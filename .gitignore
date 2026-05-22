@@ -1,0 +1,45 @@
+# ──────────── Python ────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ──────────── Node / Frontend ────────────
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# ──────────── Editors / OS ────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ──────────── Local secrets / env ────────────
+.env
+.env.*
+!.env.example
+
+# ──────────── Local Claude Code cache ────────────
+.claude/settings.local.json
+.claude/projects/
+.claude/scheduled_tasks.json
+
+# ──────────── Logs ────────────
+*.log
+
+# ──────────── Plan / scratch ────────────
+.claude/plans/

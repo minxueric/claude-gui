@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  background-color: #F8F9FA;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1;
+}
+
+.display {
+  font-family: "Instrument Serif", ui-serif, Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+.display-italic {
+  font-family: "Instrument Serif", ui-serif, Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9CA3AF;
+}
+
+.hairline { border-color: #E5E7EB; }
+
+mark {
+  background: linear-gradient(180deg, transparent 55%, #FED7AA 55%);
+  color: inherit;
+  padding: 0 1px;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+
+.markdown { line-height: 1.85; font-size: 14px; color: #111827; font-family: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif; }
+.user-bubble .markdown { color: white; }
+.user-bubble .markdown a { color: #fed7aa; }
+.user-bubble .markdown code:not(.hljs) { background: rgba(255,255,255,0.2); color: white; }
+.user-bubble ::selection { background: rgba(255,255,255,0.35); color: white; }
+.user-bubble *::selection { background: rgba(255,255,255,0.35); color: white; }
+.markdown p { margin: 0.6em 0; }
+.markdown h1 { font-family: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; font-weight: 700; font-size: 1.5em; margin: 0.8em 0 0.3em; color: #111827; }
+.markdown h2 { font-family: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; font-weight: 600; font-size: 1.25em; margin: 0.7em 0 0.3em; color: #111827; }
+.markdown h3 { font-size: 1.05em; font-weight: 600; margin: 0.6em 0 0.3em; color: #1F2937; }
+.markdown a { color: #F97316; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.markdown a:hover { color: #EA6F0C; }
+.markdown code:not(.hljs) {
+  background: #F3F4F6;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  color: #374151;
+}
+.markdown pre {
+  background: #F8F9FA;
+  color: #1F2937;
+  border: 1px solid #E5E7EB;
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0.75em 0;
+}
+.markdown pre code.hljs { background: transparent; padding: 0; color: inherit; }
+.markdown ul, .markdown ol { padding-left: 1.5em; margin: 0.5em 0; }
+.markdown ul li { list-style: disc; }
+.markdown ol li { list-style: decimal; }
+.markdown blockquote {
+  border-left: 3px solid #F97316;
+  padding-left: 1em;
+  margin: 0.7em 0;
+  color: #6B7280;
+}
+.markdown table { border-collapse: collapse; margin: 0.7em 0; width: 100%; }
+.markdown th, .markdown td { border: 1px solid #E5E7EB; padding: 8px 12px; text-align: left; }
+.markdown th { background: #F9FAFB; font-weight: 600; color: #374151; }
+
+::selection { background: #FDBA74; color: #1C1917; }
+
+.dot-divider {
+  background-image: radial-gradient(circle, #D1D5DB 0.8px, transparent 0.9px);
+  background-size: 6px 6px;
+  background-repeat: repeat-x;
+  background-position: center;
+}

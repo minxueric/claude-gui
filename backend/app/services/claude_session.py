@@ -1,0 +1,371 @@
+"""Wraps claude_agent_sdk.ClaudeSDKClient for the GUI.
+
+Each chat owns one client + one async pump that converts SDK messages into a
+queue of normalized SSE-friendly dicts. Tool permission requests pause inside
+`can_use_tool` until the frontend posts a decision.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+import uuid
+from typing import Any
+
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ClaudeSDKClient,
+    PermissionResultAllow,
+    PermissionResultDeny,
+    ResultMessage,
+    SystemMessage,
+    TextBlock,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
+)
+
+log = logging.getLogger(__name__)
+
+
+def _sanitize(obj: Any, depth: int = 0) -> Any:
+    """Recursively convert any non-JSON-native value to a serializable form.
+    Prevents SDK dataclass instances or other objects from blowing up the SSE stream."""
+    if depth > 8:
+        return str(obj)
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): _sanitize(v, depth + 1) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_sanitize(v, depth + 1) for v in obj]
+    # Fallback for dataclasses / other objects
+    if hasattr(obj, "__dict__"):
+        try:
+            return _sanitize(vars(obj), depth + 1)
+        except Exception:  # noqa: BLE001
+            return repr(obj)
+    return str(obj)
+
+
+def _block_to_dict(block: Any) -> dict:
+    if isinstance(block, TextBlock):
+        return {"type": "text", "text": block.text}
+    if isinstance(block, ThinkingBlock):
+        return {"type": "thinking", "thinking": block.thinking}
+    if isinstance(block, ToolUseBlock):
+        return {"type": "tool_use", "id": block.id, "name": block.name, "input": _sanitize(block.input)}
+    if isinstance(block, ToolResultBlock):
+        content = block.content
+        if not isinstance(content, (str, list)):
+            content = str(content)
+        return {
+            "type": "tool_result",
+            "tool_use_id": block.tool_use_id,
+            "content": _sanitize(content),
+            "is_error": getattr(block, "is_error", False),
+        }
+    return {"type": "unknown", "repr": repr(block)}
+
+
+def _message_to_event(msg: Any) -> dict | None:
+    if isinstance(msg, UserMessage):
+        # Drop tool-result messages — their content is entirely ToolResultBlocks.
+        # The SDK sets parent_tool_use_id=None on these, so we detect by content type.
+        content = msg.content
+        if isinstance(content, list) and content and all(isinstance(b, ToolResultBlock) for b in content):
+            return None
+        if isinstance(content, list):
+            blocks = [_block_to_dict(b) for b in content]
+        else:
+            blocks = [{"type": "text", "text": str(content)}]
+        return {"event": "user_message", "data": {"content": blocks}}
+    if isinstance(msg, AssistantMessage):
+        return {
+            "event": "assistant_message",
+            "data": {
+                "model": getattr(msg, "model", None),
+                "content": [_block_to_dict(b) for b in msg.content],
+            },
+        }
+    if isinstance(msg, SystemMessage):
+        subtype = getattr(msg, "subtype", None)
+        # Drop init/meta system messages — they are not useful to the UI.
+        if subtype == "init":
+            return None
+        return {"event": "system", "data": {"subtype": subtype, "raw": _sanitize(getattr(msg, "data", None))}}
+    if isinstance(msg, ResultMessage):
+        return {
+            "event": "result",
+            "data": {
+                "subtype": getattr(msg, "subtype", None),
+                "duration_ms": getattr(msg, "duration_ms", None),
+                "total_cost_usd": getattr(msg, "total_cost_usd", None),
+                "session_id": getattr(msg, "session_id", None),
+                "usage": _sanitize(getattr(msg, "usage", None)),
+            },
+        }
+    # Unknown SDK message type — log and silently drop.
+    cls = type(msg).__name__
+    log.debug("unknown SDK message type: %s repr=%s", cls, repr(msg)[:300])
+    return None
+
+
+class ChatSession:
+    def __init__(self, chat_id: str, options: ClaudeAgentOptions):
+        self.chat_id = chat_id
+        self.options = options
+        self.client: ClaudeSDKClient | None = None
+        self.queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=1024)
+        self.permission_waiters: dict[str, asyncio.Future] = {}
+        self.pump_task: asyncio.Task | None = None
+        self.created = time.time()
+        self.session_id: str | None = None
+        self._closed = False
+        self.permission_mode: str = options.permission_mode or "default"
+        self.effort: str | None = getattr(options, "effort", None)
+        # cumulative usage across turns
+        self.usage_totals: dict[str, float | int] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "total_cost_usd": 0.0,
+        }
+        self.last_model: str | None = None
+
+    async def _put(self, evt: dict) -> None:
+        """Bounded enqueue: drop non-critical events under backpressure."""
+        try:
+            self.queue.put_nowait(evt)
+        except asyncio.QueueFull:
+            # drop pings / usage if we've hit the cap, never drop messages
+            if evt.get("event") in {"ping", "usage"}:
+                return
+            await self.queue.put(evt)
+
+    async def start(self) -> None:
+        # Wire can_use_tool to ourselves before constructing the client.
+        self.options.can_use_tool = self._on_tool
+        self.client = ClaudeSDKClient(options=self.options)
+        await self.client.connect()
+        # _send_event is set each time send() is called, waking the pump loop.
+        self._send_event: asyncio.Event = asyncio.Event()
+        self._pending_content: Any = None
+        self.pump_task = asyncio.create_task(self._pump())
+
+    async def _on_tool(self, tool_name: str, tool_input: dict, context: Any):
+        request_id = uuid.uuid4().hex
+        loop = asyncio.get_event_loop()
+        fut: asyncio.Future = loop.create_future()
+        self.permission_waiters[request_id] = fut
+        log.info("can_use_tool[%s] request_id=%s tool=%s", self.chat_id[:8], request_id, tool_name)
+        # Drop suggestions — they're SDK PermissionUpdate objects that aren't
+        # JSON-serializable. The frontend doesn't use them anyway.
+        await self._put(
+            {
+                "event": "permission_request",
+                "data": {
+                    "requestId": request_id,
+                    "toolName": tool_name,
+                    "input": _sanitize(tool_input),
+                },
+            }
+        )
+        try:
+            decision = await fut
+        finally:
+            self.permission_waiters.pop(request_id, None)
+        log.info("can_use_tool[%s] resolved request_id=%s decision=%s", self.chat_id[:8], request_id, decision.get("decision"))
+        if decision.get("decision") == "allow" or decision.get("decision") == "allow_once":
+            upd = decision.get("updatedInput")
+            # SDK signature: PermissionResultAllow(updated_input=None) falls back to original_input.
+            # But some SDK versions require the dict explicitly; pass through original on None.
+            return PermissionResultAllow(updated_input=upd if upd is not None else tool_input)
+        return PermissionResultDeny(message=decision.get("message", "denied by user"))
+
+    async def _pump(self) -> None:
+        assert self.client is not None
+        try:
+            while not self._closed:
+                # Wait for send() to signal a new turn.
+                await self._send_event.wait()
+                self._send_event.clear()
+                if self._closed:
+                    break
+                content = self._pending_content
+                self._pending_content = None
+
+                # Issue query then drain this turn's messages.
+                try:
+                    if isinstance(content, list):
+                        session_id = self.session_id or "default"
+
+                        async def _stream():
+                            yield {
+                                "type": "user",
+                                "message": {"role": "user", "content": content},
+                                "parent_tool_use_id": None,
+                                "session_id": session_id,
+                            }
+
+                        await self.client.query(_stream())
+                    else:
+                        await self.client.query(content)
+
+                    async for msg in self.client.receive_messages():
+                        evt = _message_to_event(msg)
+                        if evt is None:
+                            continue
+                        if evt["event"] == "assistant_message":
+                            self.last_model = evt["data"].get("model") or self.last_model
+                        if evt["event"] == "result":
+                            data = evt["data"]
+                            if data.get("session_id"):
+                                self.session_id = data["session_id"]
+                            self._accumulate_usage(data)
+                            await self._put({"event": "usage", "data": self._usage_snapshot()})
+                            await self._put(evt)
+                            break  # one turn done, go back to waiting for next send()
+                        await self._put(evt)
+                except Exception as e:  # noqa: BLE001
+                    log.exception("pump turn error")
+                    await self._put({"event": "error", "data": {"message": str(e)}})
+        finally:
+            await self._put({"event": "done", "data": {}})
+
+    def _accumulate_usage(self, result_data: dict) -> None:
+        usage = result_data.get("usage") or {}
+        if isinstance(usage, dict):
+            for k in ("input_tokens", "output_tokens",
+                      "cache_creation_input_tokens", "cache_read_input_tokens"):
+                v = usage.get(k)
+                if isinstance(v, (int, float)):
+                    self.usage_totals[k] = int(self.usage_totals.get(k, 0)) + int(v)
+        cost = result_data.get("total_cost_usd")
+        if isinstance(cost, (int, float)):
+            self.usage_totals["total_cost_usd"] = float(self.usage_totals.get("total_cost_usd", 0.0)) + float(cost)
+
+    def _usage_snapshot(self) -> dict:
+        return {
+            "totals": dict(self.usage_totals),
+            "model": self.last_model,
+        }
+
+    async def send(self, content: Any) -> None:
+        if self.client is None:
+            raise RuntimeError("client not started")
+        self._pending_content = content
+        self._send_event.set()
+
+    async def set_permission_mode(self, mode: str) -> bool:
+        if mode not in {"default", "acceptEdits", "bypassPermissions", "plan"}:
+            return False
+        self.permission_mode = mode
+        if self.client is None:
+            return True
+        fn = getattr(self.client, "set_permission_mode", None)
+        if callable(fn):
+            try:
+                await fn(mode)
+                return True
+            except Exception:  # noqa: BLE001
+                log.exception("set_permission_mode failed")
+                return False
+        return True  # locally recorded even if SDK lacks the call
+
+    async def get_mcp_status(self) -> Any:
+        if self.client is None:
+            return None
+        fn = getattr(self.client, "get_mcp_status", None) or getattr(self.client, "mcp_status", None)
+        if callable(fn):
+            try:
+                res = fn()
+                if asyncio.iscoroutine(res):
+                    res = await res
+                return res
+            except Exception:  # noqa: BLE001
+                log.exception("get_mcp_status failed")
+                return None
+        return None
+
+    async def respond_permission(self, request_id: str, decision: str, updated_input: dict | None = None, message: str = "") -> bool:
+        fut = self.permission_waiters.get(request_id)
+        log.info(
+            "respond_permission[%s] request_id=%s decision=%s found=%s done=%s",
+            self.chat_id[:8], request_id, decision,
+            fut is not None, fut.done() if fut is not None else None,
+        )
+        if fut is None or fut.done():
+            return False
+        fut.set_result({"decision": decision, "updatedInput": updated_input, "message": message})
+        return True
+
+    async def interrupt(self) -> None:
+        # Tell the SDK to abort the in-flight turn
+        if self.client is not None:
+            try:
+                await self.client.interrupt()
+            except Exception:  # noqa: BLE001
+                log.exception("client.interrupt failed")
+        # If a tool is paused waiting for permission, deny it so _on_tool returns
+        # and the pump can exit receive_messages() naturally.
+        for req_id, fut in list(self.permission_waiters.items()):
+            if not fut.done():
+                fut.set_result({"decision": "deny", "message": "interrupted"})
+        # Emit a synthetic result so the front-end unlocks even if the SDK
+        # doesn't produce one before the next turn.
+        await self._put({"event": "result", "data": {"interrupted": True}})
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        # Wake the pump loop so it can see _closed and exit cleanly.
+        if hasattr(self, "_send_event"):
+            self._send_event.set()
+        if self.pump_task:
+            self.pump_task.cancel()
+        if self.client is not None:
+            try:
+                await self.client.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+class ChatRegistry:
+    def __init__(self) -> None:
+        self.sessions: dict[str, ChatSession] = {}
+
+    async def create(self, *, cwd: str, resume: str | None, model: str | None,
+                     permission_mode: str | None, allowed_tools: list[str] | None,
+                     system_prompt: str | None, effort: str | None = None) -> ChatSession:
+        opts = ClaudeAgentOptions(
+            cwd=cwd,
+            resume=resume,
+            model=model,
+            permission_mode=permission_mode or "default",
+            allowed_tools=allowed_tools or [],
+            system_prompt=system_prompt,
+            effort=effort or None,
+        )
+        chat_id = uuid.uuid4().hex
+        s = ChatSession(chat_id, opts)
+        if resume:
+            s.session_id = resume
+        await s.start()
+        self.sessions[chat_id] = s
+        return s
+
+    def get(self, chat_id: str) -> ChatSession | None:
+        return self.sessions.get(chat_id)
+
+    async def remove(self, chat_id: str) -> None:
+        s = self.sessions.pop(chat_id, None)
+        if s:
+            await s.close()
+
+
+registry = ChatRegistry()
