@@ -5,6 +5,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Stack](https://img.shields.io/badge/stack-FastAPI%20%2B%20React%20%2B%20SQLite-orange)
 
+![Claude GUI overview](docs/images/overview.png)
+
 Claude GUI 把 Claude Code CLI 写到 `~/.claude/projects/` 的 JSONL 会话记录索引到 SQLite/FTS5，搭配一个完整的图形化聊天客户端，让你能像用网页版 Claude 一样开始 / 续接对话，但**所有数据和模型调用仍然在你本地**。同时与 CLI 共存：CLI 写入的会话会实时同步显示，GUI 启动的会话也能在 CLI 里 `/resume` 续接。
 
 ## 快速开始
@@ -163,44 +165,7 @@ make run        # 浏览器访问 http://127.0.0.1:8765
 
 ## API 速览
 
-实时聊天：
-```
-POST   /api/chat/sessions
-GET    /api/chat/{id}/stream    (SSE)
-POST   /api/chat/{id}/input
-POST   /api/chat/{id}/permission
-POST   /api/chat/{id}/permission_mode
-POST   /api/chat/{id}/effort
-POST   /api/chat/{id}/interrupt
-GET    /api/chat/active
-DELETE /api/chat/{id}
-```
-
-会话管理：
-```
-GET    /api/projects
-GET    /api/projects/{encoded}/sessions
-GET    /api/sessions             (recent)
-GET    /api/sessions/{id}
-PATCH  /api/sessions/{id}        (rename)
-DELETE /api/sessions/{id}
-```
-
-文件 / 搜索 / 其他：
-```
-GET    /api/files/tree
-GET    /api/files/match
-GET    /api/files/read[?raw=1]
-POST   /api/files/reveal
-GET    /api/files/pick-folder
-GET    /api/search[?q&project&role&tool]
-GET    /api/search/facets
-GET    /api/commands
-GET    /api/memory   POST /api/memory/append   PUT /api/memory
-GET    /api/todos    /api/tasks   /api/plans
-GET    /api/stats/{daily|models|tools|totals}
-GET    /api/mcp/{servers|status/{chat_id}}
-```
+详见 `backend/app/routers/`，或启动后访问 `http://127.0.0.1:8765/docs`（FastAPI 自动生成的 OpenAPI 文档）。
 
 ## 项目结构
 
