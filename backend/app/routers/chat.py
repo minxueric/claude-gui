@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 
 from fastapi import APIRouter, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from ..config import PROJECTS_DIR
+from ..db import get_conn
+from ..indexer import scanner
 from ..models import (
     ChatEffortRequest,
     ChatInputRequest,
@@ -20,6 +23,8 @@ from ..models import (
 from ..services.claude_session import registry
 
 router = APIRouter()
+
+log = logging.getLogger(__name__)
 
 
 # A jsonl file modified within this window is treated as a live CLI session.
@@ -68,6 +73,17 @@ async def start_chat(req: ChatStartRequest) -> ChatStartResponse:
         system_prompt=req.systemPrompt,
         effort=req.effort,
     )
+    # Make sure the project dir is indexed right away so a brand-new cwd
+    # shows up in the sidebar without waiting for the watcher debounce
+    # cycle (or the first jsonl write).
+    if req.cwd:
+        encoded = "-" + req.cwd.lstrip("/").replace("/", "-")
+        proj_dir = PROJECTS_DIR / encoded
+        if proj_dir.exists():
+            try:
+                scanner.sync_project(get_conn(), proj_dir)
+            except Exception:  # noqa: BLE001
+                log.exception("post-create sync_project failed for %s", proj_dir)
     return ChatStartResponse(chatId=s.chat_id)
 
 

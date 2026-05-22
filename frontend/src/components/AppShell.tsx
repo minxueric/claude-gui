@@ -288,7 +288,8 @@ export default function AppShell() {
   const { data: recent } = useQuery({
     queryKey: ["recent-sessions"],
     queryFn: () => api.recentSessions(60),
-    refetchInterval: 30_000,
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: true,
   });
   const { data: activeData } = useQuery({
     queryKey: ["active-chats"],
