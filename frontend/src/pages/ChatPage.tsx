@@ -10,6 +10,7 @@ import McpStatusPanel from "../components/chat/McpStatusPanel";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { messagesToTurns } from "../lib/messagesToTurns";
+import FolderPicker from "../components/FolderPicker";
 
 export default function ChatPage() {
   const [params] = useSearchParams();
@@ -26,6 +27,7 @@ export default function ChatPage() {
   // from the start form into the regular chat UI without creating a backend
   // session (SDK is launched lazily on first send).
   const [ready, setReady] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const { data: projects } = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const [showFiles, setShowFiles] = useState(false);
@@ -219,10 +221,7 @@ export default function ChatPage() {
                 />
                 <button
                   type="button"
-                  onClick={async () => {
-                    const res = await api.pickFolder();
-                    if (res.path) setCwd(res.path);
-                  }}
+                  onClick={() => setPickerOpen(true)}
                   title="Browse for folder"
                   className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-500 hover:text-orange-600 hover:border-orange-300 transition-colors text-[14px]"
                 >
@@ -244,6 +243,13 @@ export default function ChatPage() {
             Start chat →
           </button>
         </form>
+        {pickerOpen && (
+          <FolderPicker
+            initialPath={cwd || undefined}
+            onPick={(p) => { setCwd(p); setPickerOpen(false); }}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
       </div>
     );
   }

@@ -105,6 +105,40 @@ def pick_folder() -> dict:
         raise HTTPException(500, f"folder picker failed: {e}")
 
 
+@router.get("/files/browse")
+def browse(path: str = Query("~")) -> dict:
+    """List directories at an arbitrary filesystem path, for an in-app
+    folder picker UI. Returns only sub-directories (files filtered out)."""
+    try:
+        target = Path(path).expanduser().resolve()
+    except Exception:
+        raise HTTPException(400, "invalid path")
+    if not target.exists():
+        raise HTTPException(404, "path not found")
+    if not target.is_dir():
+        raise HTTPException(400, "not a directory")
+    entries: list[dict] = []
+    try:
+        for child in sorted(target.iterdir(), key=lambda p: p.name.lower()):
+            if not child.is_dir():
+                continue
+            # skip well-known noise dirs
+            if child.name.startswith(".") and child.name not in {".claude", ".config"}:
+                continue
+            if child.name in IGNORE_DIRS:
+                continue
+            entries.append({"name": child.name, "path": str(child)})
+    except PermissionError:
+        raise HTTPException(403, "permission denied")
+    parent = str(target.parent) if str(target) != "/" else None
+    return {
+        "path": str(target),
+        "parent": parent,
+        "home": str(Path.home()),
+        "entries": entries,
+    }
+
+
 
 @router.get("/files/tree", response_model=TreeResponse)
 def tree(cwd: str = Query(...), path: str = Query(""), encoding: str = Query("")) -> TreeResponse:

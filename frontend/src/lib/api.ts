@@ -158,6 +158,10 @@ export const api = {
   recentSessions: (limit = 40) => get<SessionSummary[]>(`/api/sessions?limit=${limit}`),
   activeChats: () => get<{ sessions: { chatId: string; sessionId: string | null }[] }>("/api/chat/active"),
   pickFolder: () => get<{ path: string | null }>("/api/files/pick-folder"),
+  browseFolder: (path: string) =>
+    get<{ path: string; parent: string | null; home: string; entries: { name: string; path: string }[] }>(
+      `/api/files/browse?path=${encodeURIComponent(path)}`
+    ),
   sessions: (encoded: string, q?: string) => {
     const sp = new URLSearchParams();
     if (q) sp.set("q", q);
@@ -282,6 +286,8 @@ export const api = {
     if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
     return r.json() as Promise<{ ok: boolean; model: string | null }>;
   },
+  customModels: () =>
+    get<{ models: { value: string; label: string; desc: string }[] }>("/api/chat/models"),
   chatUsage: (chatId: string) =>
     get<{ totals: Record<string, number>; model: string | null }>(`/api/chat/${chatId}/usage`),
   chatMcp: (chatId: string) =>

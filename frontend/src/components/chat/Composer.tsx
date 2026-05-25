@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api, FileMatch, SlashCommand } from "../../lib/api";
 import { useSlashCommands, filterCommands } from "../../hooks/useSlashCommands";
 import { useCwdFileMatch } from "../../hooks/useCwdFiles";
@@ -424,9 +425,12 @@ function ModeDropdown({ mode, onChange }: { mode: string; onChange?: (m: string)
       <button
         onClick={() => setOpen((o) => !o)}
         title="Permission mode (Shift+Tab to cycle)"
-        className={"px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-colors inline-flex items-center gap-1 hover:bg-gray-50 " + cur.cls}
+        className={"px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-colors inline-flex items-center gap-1.5 hover:bg-gray-50 " + cur.cls}
       >
-        <span>{cur.label}</span>
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" className="shrink-0">
+          <path d="M8 1.5l5.5 2v5c0 3.5-2.5 5.5-5.5 6.5-3-1-5.5-3-5.5-6.5v-5l5.5-2z" strokeLinejoin="round"/>
+        </svg>
+        <span>{cur.value === "default" ? "Mode" : cur.label}</span>
         <span className="text-[9px] text-gray-400">▾</span>
       </button>
       {open && (
@@ -468,9 +472,12 @@ function EffortDropdown({ effort, onChange }: { effort?: string; onChange?: (e: 
       <button
         onClick={() => setOpen((o) => !o)}
         title="Thinking effort"
-        className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 text-[11px] font-medium transition-colors inline-flex items-center gap-1"
+        className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 text-[11px] font-medium transition-colors inline-flex items-center gap-1.5"
       >
-        <span>⎈ {cur.label}</span>
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" className="shrink-0">
+          <path d="M8 1.5C5 1.5 3 3.5 3 6c0 1.5.7 2.6 1.5 3.5.5.6.5 1.3.5 2v.5h6V11c0-.7 0-1.4.5-2C12.3 8.6 13 7.5 13 6c0-2.5-2-4.5-5-4.5zM6 13.5h4M6.5 15h3" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        <span>{cur.label === "Default" ? "Effort" : cur.label}</span>
         <span className="text-[9px] text-gray-400">▾</span>
       </button>
       {open && (
@@ -504,23 +511,45 @@ const MODEL_OPTIONS: { value: string; label: string; desc: string }[] = [
 
 function ModelDropdown({ model, onChange }: { model?: string; onChange?: (m: string) => void }) {
   const [open, setOpen] = useState(false);
-  const cur = MODEL_OPTIONS.find((o) => o.value === (model || "")) || MODEL_OPTIONS[0];
+  // Fetch user models from ~/.claude/settings.json on first render
+  const { data: extra } = useQuery({
+    queryKey: ["custom-models"],
+    queryFn: () => api.customModels(),
+    staleTime: 60_000,
+  });
+  const options = useMemo(() => {
+    const merged = [...MODEL_OPTIONS];
+    const seen = new Set(merged.map((o) => o.value));
+    for (const m of extra?.models || []) {
+      if (m.value && !seen.has(m.value)) {
+        merged.push(m);
+        seen.add(m.value);
+      }
+    }
+    return merged;
+  }, [extra]);
+  const cur = options.find((o) => o.value === (model || "")) || options[0];
   return (
     <div className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
         title="Model"
-        className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 text-[11px] font-medium transition-colors inline-flex items-center gap-1"
+        className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 text-[11px] font-medium transition-colors inline-flex items-center gap-1.5"
       >
-        <span>◆ {cur.label}</span>
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" className="shrink-0">
+          <ellipse cx="8" cy="8" rx="3" ry="6.5" transform="rotate(45 8 8)" />
+          <ellipse cx="8" cy="8" rx="3" ry="6.5" transform="rotate(-45 8 8)" />
+          <circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none" />
+        </svg>
+        <span>{cur.label === "Default" ? "Model" : cur.label}</span>
         <span className="text-[9px] text-gray-400">▾</span>
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full mb-1 left-0 z-50 w-56 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+          <div className="absolute bottom-full mb-1 left-0 z-50 w-56 bg-white border border-gray-200 rounded-lg shadow-lg py-1 max-h-[60vh] overflow-y-auto">
             <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Model</div>
-            {MODEL_OPTIONS.map((o) => (
+            {options.map((o) => (
               <button
                 key={o.value || "default"}
                 onClick={() => { setOpen(false); onChange?.(o.value); }}
