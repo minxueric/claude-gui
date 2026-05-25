@@ -101,17 +101,27 @@ export default function ChatPage() {
   const loadedHistoryRef = useRef<string | null>(null);
   useEffect(() => {
     if (!resume || !historyQ.data) return;
-    // Always reload on first arrival; subsequent polls only when idle to
-    // avoid stomping in-flight optimistic turns.
+    // We use the JSONL history as the source of truth only when there is no
+    // live backend session (chatId === null, lazy-start state). Once a live
+    // session exists, the SSE store is the source of truth — polling JSONL
+    // and reassigning turns would clobber optimistic in-flight messages and
+    // cause the page to "jump" back to the older snapshot every refresh.
     const firstLoad = loadedHistoryRef.current !== resume;
-    if (!firstLoad && state.status === "running") return;
     const turns = messagesToTurns(historyQ.data.messages);
-    setHistoryTurns(turns);
-    // Also push into the live store (no-op when chatId is null, which is fine
-    // — historyTurns is the source of truth in that case).
-    if (chatId) setTurns(turns);
-    loadedHistoryRef.current = resume;
-  }, [historyQ.data, resume, state.status, setTurns, chatId]);
+    if (!chatId) {
+      // pre-SDK: keep history visible
+      setHistoryTurns(turns);
+      loadedHistoryRef.current = resume;
+      return;
+    }
+    if (firstLoad) {
+      // first hydration after a live session was created: seed the store once
+      setHistoryTurns(turns);
+      setTurns(turns);
+      loadedHistoryRef.current = resume;
+    }
+    // After the first seed, do NOT overwrite — let the SSE stream drive turns.
+  }, [historyQ.data, resume, setTurns, chatId]);
 
   const start = async () => {
     if (!cwd) return;
