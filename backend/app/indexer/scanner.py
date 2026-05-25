@@ -88,7 +88,19 @@ def index_session_file(conn, encoded_project: str, jsonl_path: Path, session_met
 
     for entry in jsonl_reader.iter_jsonl(jsonl_path):
         d = entry.data
-        uuid = d.get("uuid") or d.get("messageId")
+        # Prefix to avoid the rare-but-real case where Claude Code reuses the
+        # same UUID for a file-history-snapshot's messageId AND a regular
+        # user/assistant message's uuid (this happens for the very first user
+        # message that triggered the snapshot). Without prefixing, the UNIQUE
+        # constraint silently drops the user message.
+        raw_id = d.get("uuid")
+        msg_id = d.get("messageId")
+        if raw_id:
+            uuid = f"u:{raw_id}"
+        elif msg_id:
+            uuid = f"m:{msg_id}"
+        else:
+            uuid = None
         if not uuid:
             continue
         info = jsonl_reader.classify(d)

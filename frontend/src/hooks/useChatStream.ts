@@ -47,7 +47,8 @@ export interface UsageSnapshot {
 
 export interface ChatStreamState {
   turns: ChatTurn[];
-  pending?: PermissionRequest;
+  pending?: PermissionRequest;          // head of pendingQueue, surfaced for UI
+  pendingQueue?: PermissionRequest[];   // FIFO of all outstanding permission requests
   status: "idle" | "open" | "running" | "done" | "error";
   error?: string;
   usage?: UsageSnapshot;
@@ -143,19 +144,22 @@ function openStream(chatId: string, e: Entry) {
   });
   es.addEventListener("permission_request", (ev: MessageEvent) => {
     const d = JSON.parse(ev.data) as PermissionRequest;
-    updateState(chatId, (s) => ({ ...s, pending: d, lastEventAt: Date.now() }));
+    updateState(chatId, (s) => {
+      const q = [...(s.pendingQueue || []), d];
+      return { ...s, pendingQueue: q, pending: q[0], lastEventAt: Date.now() };
+    });
   });
   es.addEventListener("ping", () => { bump(); });
   es.addEventListener("error", (ev: MessageEvent) => {
     try {
       const d = JSON.parse((ev as any).data || "{}");
-      updateState(chatId, (s) => ({ ...s, status: "error", error: d.message, pending: undefined, lastEventAt: Date.now() }));
+      updateState(chatId, (s) => ({ ...s, status: "error", error: d.message, pending: undefined, pendingQueue: [], lastEventAt: Date.now() }));
     } catch {
-      updateState(chatId, (s) => ({ ...s, status: "error", pending: undefined, lastEventAt: Date.now() }));
+      updateState(chatId, (s) => ({ ...s, status: "error", pending: undefined, pendingQueue: [], lastEventAt: Date.now() }));
     }
   });
   es.addEventListener("done", () => {
-    updateState(chatId, (s) => ({ ...s, status: "idle", pending: undefined, lastEventAt: Date.now() }));
+    updateState(chatId, (s) => ({ ...s, status: "idle", pending: undefined, pendingQueue: [], lastEventAt: Date.now() }));
   });
 }
 
@@ -256,7 +260,10 @@ export function useChatStream(chatId: string | null, initialMode: string = "defa
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      updateState(chatId, (s) => ({ ...s, pending: undefined }));
+      updateState(chatId, (s) => {
+        const q = (s.pendingQueue || []).filter((p) => p.requestId !== pending.requestId);
+        return { ...s, pendingQueue: q, pending: q[0] };
+      });
     },
     [chatId]
   );
