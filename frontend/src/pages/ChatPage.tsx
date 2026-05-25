@@ -79,9 +79,22 @@ export default function ChatPage() {
     return () => el.removeEventListener("scroll", onScroll);
   }, [chatId, turns.length, isNearBottom]);
 
+  // Auto-scroll to bottom when new turns arrive. Use direct scrollTop
+  // assignment (instant) rather than scrollIntoView({behavior:"smooth"}),
+  // which can produce a visible long-distance animation if the layout
+  // shifts after async content (markdown highlight, images) finishes
+  // measuring.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [turns.length, state.pending?.requestId]);
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    // Only auto-scroll if the user is already near the bottom; otherwise we'd
+    // yank them away from scrolled-up reading.
+    if (!isNearBottom()) return;
+    requestAnimationFrame(() => {
+      const c = scrollContainerRef.current;
+      if (c) c.scrollTop = c.scrollHeight;
+    });
+  }, [turns.length, state.pending?.requestId, isNearBottom]);
 
   // Load historical messages for resumed sessions, and poll for CLI updates.
   // Note: state.turns includes both live SSE events and historical ones; we
