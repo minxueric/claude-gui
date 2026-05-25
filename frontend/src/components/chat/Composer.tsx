@@ -604,6 +604,16 @@ const WORKING_VERBS: Array<[string, string]> = [
   ["Wrangling", "驯服中"],
 ];
 
+function fmtElapsed(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m < 60) return s ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm ? `${h}h ${rm}m` : `${h}h`;
+}
+
 function WorkingIndicator({ lastEventAt, onInterrupt }: { lastEventAt?: number; onInterrupt?: () => void | Promise<void> }) {
   const [idx, setIdx] = useState(() => Math.floor(Math.random() * WORKING_VERBS.length));
   const [elapsed, setElapsed] = useState(0);
@@ -639,7 +649,7 @@ function WorkingIndicator({ lastEventAt, onInterrupt }: { lastEventAt?: number; 
       <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-amber-600">
         <span className="inline-block w-2 h-2 rounded-full bg-amber-400" />
         <span>Seems stuck</span>
-        <span className="text-[11px] text-amber-500/80">没响应 {silenceSec}s</span>
+        <span className="text-[11px] text-amber-500/80">没响应 {fmtElapsed(silenceSec)}</span>
         {onInterrupt && (
           <button
             onClick={() => onInterrupt()}
@@ -660,7 +670,7 @@ function WorkingIndicator({ lastEventAt, onInterrupt }: { lastEventAt?: number; 
       </span>
       <span>{verb}…</span>
       <span className="text-[11px] text-orange-400/80">{zh}</span>
-      <span className="font-mono text-[11px] text-orange-400 tabular-nums">({elapsed}s)</span>
+      <span className="font-mono text-[11px] text-orange-400 tabular-nums">({fmtElapsed(elapsed)})</span>
     </span>
   );
 }
