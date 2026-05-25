@@ -130,6 +130,9 @@ class ChatSession:
         self.session_id: str | None = None
         self._closed = False
         self.permission_mode: str = options.permission_mode or "default"
+        # Remember the mode we were in before entering "plan", so we can
+        # restore (or auto-upgrade to acceptEdits) after ExitPlanMode.
+        self._pre_plan_mode: str = self.permission_mode if self.permission_mode != "plan" else "default"
         self.effort: str | None = getattr(options, "effort", None)
         # cumulative usage across turns
         self.usage_totals: dict[str, float | int] = {
@@ -180,6 +183,46 @@ class ChatSession:
         # picker in the GUI, then synthesize the answer string back to Claude
         # via PermissionResultDeny(message=...). Deny-with-message is the SDK
         # path that produces an arbitrary tool_result string for the model.
+        # ExitPlanMode is Claude's signal that it's ready to leave plan mode
+        # and start executing. CLI behavior: surface the plan to the user,
+        # let them Approve (→ auto-switch to acceptEdits or restore the mode
+        # the user was in before plan), Keep planning (deny — plan mode
+        # stays, Claude revises), or Approve + stay in default.
+        if tool_name == "ExitPlanMode":
+            request_id = uuid.uuid4().hex
+            loop = asyncio.get_event_loop()
+            fut: asyncio.Future = loop.create_future()
+            self.permission_waiters[request_id] = fut
+            plan_text = ""
+            if isinstance(tool_input, dict):
+                plan_text = str(tool_input.get("plan") or "")
+            snap = {
+                "kind": "plan_exit",
+                "requestId": request_id,
+                "plan": plan_text,
+                "prePlanMode": self._pre_plan_mode,
+            }
+            self.pending_requests[request_id] = snap
+            await self._put({"event": "plan_exit", "data": snap})
+            try:
+                decision = await fut
+            finally:
+                self.permission_waiters.pop(request_id, None)
+                self.pending_requests.pop(request_id, None)
+            choice = decision.get("decision")  # "approve_auto" | "approve_keep" | "keep_planning"
+            if choice == "approve_auto":
+                # Switch to acceptEdits (or whatever pre-plan if it was already permissive)
+                target = "acceptEdits" if self._pre_plan_mode in ("default", "plan") else self._pre_plan_mode
+                await self.set_permission_mode(target)
+                return PermissionResultAllow(updated_input=tool_input)
+            if choice == "approve_keep":
+                # Restore the user's pre-plan mode exactly.
+                await self.set_permission_mode(self._pre_plan_mode)
+                return PermissionResultAllow(updated_input=tool_input)
+            # "keep_planning" or anything else: deny so Claude keeps planning.
+            msg = decision.get("message") or "User wants to refine the plan; do not exit plan mode yet."
+            return PermissionResultDeny(message=msg)
+
         if tool_name == "AskUserQuestion":
             request_id = uuid.uuid4().hex
             loop = asyncio.get_event_loop()
@@ -353,12 +396,25 @@ class ChatSession:
     async def set_permission_mode(self, mode: str) -> bool:
         if mode not in {"default", "acceptEdits", "bypassPermissions", "plan"}:
             return False
+        # Track the mode we had before entering plan so ExitPlanMode can
+        # restore it (or auto-upgrade to acceptEdits, matching CLI behavior).
+        if mode == "plan" and self.permission_mode != "plan":
+            self._pre_plan_mode = self.permission_mode
         # Always remember the mode locally — _on_tool consults it directly to
         # auto-allow tools, so this works even when the SDK refuses the
         # control request (e.g. switching to bypassPermissions on a session
         # that wasn't launched with --dangerously-skip-permissions: the SDK
         # blocks but our GUI-side bypass still kicks in).
+        changed = self.permission_mode != mode
         self.permission_mode = mode
+        if changed:
+            # Notify any connected GUI so its mode dropdown stays in sync
+            # with backend-initiated transitions (e.g. ExitPlanMode auto-
+            # upgrade to acceptEdits).
+            try:
+                await self._put({"event": "mode_changed", "data": {"mode": mode}})
+            except Exception:  # noqa: BLE001
+                pass
         if self.client is None:
             return True
         fn = getattr(self.client, "set_permission_mode", None)

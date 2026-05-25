@@ -193,9 +193,17 @@ async def state(chat_id: str) -> dict:
         raise HTTPException(404, "chat not found")
     permissions = []
     asks = []
+    plan_exit = None
     for req in s.pending_requests.values():
-        if req.get("kind") == "ask":
+        kind = req.get("kind")
+        if kind == "ask":
             asks.append({"requestId": req["requestId"], "input": req.get("input")})
+        elif kind == "plan_exit":
+            plan_exit = {
+                "requestId": req["requestId"],
+                "plan": req.get("plan"),
+                "prePlanMode": req.get("prePlanMode"),
+            }
         else:
             permissions.append({
                 "requestId": req["requestId"],
@@ -210,6 +218,7 @@ async def state(chat_id: str) -> dict:
         "model": s.last_model,
         "pendingPermissions": permissions,
         "pendingAsk": asks[0] if asks else None,
+        "pendingPlanExit": plan_exit,
     }
 
 

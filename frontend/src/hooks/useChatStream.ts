@@ -45,6 +45,12 @@ export interface AskUserQuestionRequest {
   questions: AskQuestion[];
 }
 
+export interface PlanExitRequest {
+  requestId: string;
+  plan: string;
+  prePlanMode: string;
+}
+
 export interface UsageTotals {
   input_tokens: number;
   output_tokens: number;
@@ -63,6 +69,7 @@ export interface ChatStreamState {
   pending?: PermissionRequest;          // head of pendingQueue, surfaced for UI
   pendingQueue?: PermissionRequest[];   // FIFO of all outstanding permission requests
   askPending?: AskUserQuestionRequest;  // current AskUserQuestion request
+  planExitPending?: PlanExitRequest;    // current ExitPlanMode approval prompt
   status: "idle" | "open" | "running" | "done" | "error";
   error?: string;
   usage?: UsageSnapshot;
@@ -131,6 +138,13 @@ function openStream(chatId: string, e: Entry) {
           next.askPending = {
             requestId: snap.pendingAsk.requestId,
             questions: snap.pendingAsk.input?.questions || [],
+          };
+        }
+        if (snap.pendingPlanExit) {
+          next.planExitPending = {
+            requestId: snap.pendingPlanExit.requestId,
+            plan: snap.pendingPlanExit.plan || "",
+            prePlanMode: snap.pendingPlanExit.prePlanMode || "default",
           };
         }
         return next;
@@ -207,17 +221,27 @@ function openStream(chatId: string, e: Entry) {
     };
     updateState(chatId, (s) => ({ ...s, askPending: req, lastEventAt: Date.now() }));
   });
+  es.addEventListener("plan_exit", (ev: MessageEvent) => {
+    const d = JSON.parse(ev.data) as PlanExitRequest;
+    updateState(chatId, (s) => ({ ...s, planExitPending: d, lastEventAt: Date.now() }));
+  });
+  es.addEventListener("mode_changed", (ev: MessageEvent) => {
+    try {
+      const d = JSON.parse(ev.data) as { mode: string };
+      if (d.mode) updateState(chatId, (s) => ({ ...s, mode: d.mode, lastEventAt: Date.now() }));
+    } catch {}
+  });
   es.addEventListener("ping", () => { bump(); });
   es.addEventListener("error", (ev: MessageEvent) => {
     try {
       const d = JSON.parse((ev as any).data || "{}");
-      updateState(chatId, (s) => ({ ...s, status: "error", error: d.message, pending: undefined, pendingQueue: [], askPending: undefined, turnStartedAt: undefined, lastEventAt: Date.now() }));
+      updateState(chatId, (s) => ({ ...s, status: "error", error: d.message, pending: undefined, pendingQueue: [], askPending: undefined, planExitPending: undefined, turnStartedAt: undefined, lastEventAt: Date.now() }));
     } catch {
-      updateState(chatId, (s) => ({ ...s, status: "error", pending: undefined, pendingQueue: [], askPending: undefined, turnStartedAt: undefined, lastEventAt: Date.now() }));
+      updateState(chatId, (s) => ({ ...s, status: "error", pending: undefined, pendingQueue: [], askPending: undefined, planExitPending: undefined, turnStartedAt: undefined, lastEventAt: Date.now() }));
     }
   });
   es.addEventListener("done", () => {
-    updateState(chatId, (s) => ({ ...s, status: "idle", pending: undefined, pendingQueue: [], askPending: undefined, turnStartedAt: undefined, lastEventAt: Date.now() }));
+    updateState(chatId, (s) => ({ ...s, status: "idle", pending: undefined, pendingQueue: [], askPending: undefined, planExitPending: undefined, turnStartedAt: undefined, lastEventAt: Date.now() }));
   });
 }
 
@@ -342,6 +366,21 @@ export function useChatStream(chatId: string | null, initialMode: string = "defa
     [chatId]
   );
 
+  const respondPlanExit = useCallback(
+    async (decision: "approve_auto" | "approve_keep" | "keep_planning", message?: string) => {
+      if (!chatId) return;
+      const req = stateRef.current.planExitPending;
+      if (!req) return;
+      await fetch(`/api/chat/${chatId}/permission`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId: req.requestId, decision, message }),
+      });
+      updateState(chatId, (s) => ({ ...s, planExitPending: undefined }));
+    },
+    [chatId]
+  );
+
   const interrupt = useCallback(async () => {
     if (!chatId) return;
     await fetch(`/api/chat/${chatId}/interrupt`, { method: "POST" });
@@ -383,7 +422,7 @@ export function useChatStream(chatId: string | null, initialMode: string = "defa
     // No-op; useSyncExternalStore + subscribe handle attach/detach.
   }, [chatId]);
 
-  return { state, sendInput, respondPermission, respondAskUserQuestion, interrupt, setMode, setTurns };
+  return { state, sendInput, respondPermission, respondAskUserQuestion, respondPlanExit, interrupt, setMode, setTurns };
 }
 
 const EMPTY: ChatStreamState = { turns: [], status: "idle", mode: "default" };

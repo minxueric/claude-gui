@@ -1,10 +1,11 @@
 import { useState, useMemo } from "react";
-import { ChatTurn, ChatBlock, PermissionRequest, AskUserQuestionRequest } from "../../hooks/useChatStream";
+import { ChatTurn, ChatBlock, PermissionRequest, AskUserQuestionRequest, PlanExitRequest } from "../../hooks/useChatStream";
 import MarkdownBlock from "../blocks/MarkdownBlock";
 import ThinkingBlock from "../blocks/ThinkingBlock";
 import EditDiffBlock from "../blocks/EditDiffBlock";
 import PermissionPrompt from "./PermissionPrompt";
 import AskUserQuestionPrompt from "./AskUserQuestionPrompt";
+import PlanExitPrompt from "./PlanExitPrompt";
 import { useFilePreview } from "./FilePreviewContext";
 
 const DIFF_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
@@ -16,6 +17,8 @@ interface Props {
   onDecide?: (d: "allow" | "deny" | "allow_once", message?: string) => void;
   askPending?: AskUserQuestionRequest;
   onAnswer?: (answers: Record<string, string>) => void;
+  planExitPending?: PlanExitRequest;
+  onPlanExit?: (d: "approve_auto" | "approve_keep" | "keep_planning") => void;
 }
 
 interface StepItem {
@@ -60,7 +63,7 @@ function resultPreview(content: any): { line: string; lineCount: number; chars: 
   return { line, lineCount, chars: text.length, text };
 }
 
-export default function AssistantTurnGroup({ turns, cwd, pending, onDecide, askPending, onAnswer }: Props) {
+export default function AssistantTurnGroup({ turns, cwd, pending, onDecide, askPending, onAnswer, planExitPending, onPlanExit }: Props) {
   const filePreview = useFilePreview();
   const steps: StepItem[] = useMemo(() => {
     const out: StepItem[] = [];
@@ -333,6 +336,11 @@ export default function AssistantTurnGroup({ turns, cwd, pending, onDecide, askP
           {askPending && onAnswer && (
             <ol className="space-y-1">
               <AskUserQuestionPrompt req={askPending} onAnswer={onAnswer} />
+            </ol>
+          )}
+          {planExitPending && onPlanExit && (
+            <ol className="space-y-1">
+              <PlanExitPrompt req={planExitPending} onDecide={onPlanExit} />
             </ol>
           )}
         </div>
