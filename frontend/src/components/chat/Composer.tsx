@@ -502,16 +502,14 @@ function EffortDropdown({ effort, onChange }: { effort?: string; onChange?: (e: 
   );
 }
 
+// Only show the "default" sentinel here. Real model choices come from the
+// user's ~/.claude/settings.json (fetched via /api/chat/models).
 const MODEL_OPTIONS: { value: string; label: string; desc: string }[] = [
-  { value: "", label: "Default", desc: "SDK default (Opus 4.7)" },
-  { value: "claude-opus-4-7", label: "Opus 4.7", desc: "Most capable" },
-  { value: "claude-sonnet-4-6", label: "Sonnet 4.6", desc: "Balanced" },
-  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", desc: "Fastest" },
+  { value: "", label: "Default", desc: "Whatever Claude Code picks" },
 ];
 
 function ModelDropdown({ model, onChange }: { model?: string; onChange?: (m: string) => void }) {
   const [open, setOpen] = useState(false);
-  // Fetch user models from ~/.claude/settings.json on first render
   const { data: extra } = useQuery({
     queryKey: ["custom-models"],
     queryFn: () => api.customModels(),

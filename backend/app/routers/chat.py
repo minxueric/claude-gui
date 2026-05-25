@@ -63,53 +63,46 @@ async def active_sessions() -> dict:
     return {"sessions": result}
 
 
-# Built-in models surfaced to the GUI. The frontend merges these with
-# user-defined ones from ~/.claude/settings.json -> _models.
-_BUILTIN_MODELS: list[dict] = [
-    {"value": "", "label": "Default", "desc": "Uses SDK default"},
-    {"value": "claude-opus-4-7", "label": "Opus 4.7", "desc": "Most capable"},
-    {"value": "claude-sonnet-4-6", "label": "Sonnet 4.6", "desc": "Balanced"},
-    {"value": "claude-haiku-4-5-20251001", "label": "Haiku 4.5", "desc": "Fastest"},
-]
-
-
 @router.get("/chat/models")
 async def list_models() -> dict:
-    """Return built-in models + any user-defined models found in
-    ~/.claude/settings.json (looks at both `model` and `_models` keys)."""
+    """Return user-defined models from ~/.claude/settings.json. These reflect
+    the user's actual alias configuration (e.g. `opus` -> a custom-endpoint
+    model id) so they're surfaced as-is, not de-duplicated against the
+    built-in name list."""
     import json
     from ..config import CLAUDE_HOME
 
-    seen = {m["value"] for m in _BUILTIN_MODELS}
-    extras: list[dict] = []
+    user_models: list[dict] = []
+    seen_pairs: set[tuple[str, str]] = set()
     settings_path = CLAUDE_HOME / "settings.json"
     if settings_path.exists():
         try:
             data = json.loads(settings_path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             data = {}
-        # `_models` is a {alias: model_id} mapping seen in user configs
         models_map = data.get("_models") or {}
         if isinstance(models_map, dict):
             for alias, mid in models_map.items():
-                if not isinstance(mid, str) or not mid or mid in seen:
+                if not isinstance(mid, str) or not mid:
                     continue
-                seen.add(mid)
-                extras.append({
+                key = (alias, mid)
+                if key in seen_pairs:
+                    continue
+                seen_pairs.add(key)
+                user_models.append({
                     "value": mid,
-                    "label": f"{alias} ({mid[:24]}…)" if len(mid) > 24 else f"{alias} ({mid})",
-                    "desc": "From ~/.claude/settings.json",
+                    "label": alias,
+                    "desc": mid if len(mid) <= 38 else mid[:38] + "…",
                 })
-        # top-level `model` may be a custom id not in builtins
+        # `model` top-level (if not already covered by an alias)
         top_model = data.get("model")
-        if isinstance(top_model, str) and top_model and top_model not in seen:
-            seen.add(top_model)
-            extras.append({
+        if isinstance(top_model, str) and top_model and not any(m["value"] == top_model for m in user_models):
+            user_models.append({
                 "value": top_model,
                 "label": top_model[:30],
                 "desc": "From settings.json",
             })
-    return {"models": extras}
+    return {"models": user_models}
 
 
 @router.post("/chat/sessions", response_model=ChatStartResponse)
