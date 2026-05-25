@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFileTree } from "../../hooks/useCwdFiles";
 import { TreeEntry, FileMatch, api } from "../../lib/api";
+import { toast } from "../../lib/toast";
 import { useFilePreview } from "./FilePreviewContext";
 import { ChatTurn } from "../../hooks/useChatStream";
 
@@ -376,14 +377,23 @@ function ContextMenu({
     {
       label: "Copy path",
       onClick: async () => {
-        try { await navigator.clipboard.writeText(menu.path); } catch {}
+        try {
+          await navigator.clipboard.writeText(menu.path);
+          toast.success("Path copied");
+        } catch (e) {
+          toast.error("Copy failed", { description: (e as Error).message });
+        }
         onClose();
       },
     },
     {
       label: "Reveal in Finder",
       onClick: async () => {
-        try { await api.fileReveal(cwd, menu.path); } catch {}
+        try {
+          await api.fileReveal(cwd, menu.path);
+        } catch (e) {
+          toast.error("Reveal failed", { description: (e as Error).message });
+        }
         onClose();
       },
     },

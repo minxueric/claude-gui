@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, sessionTitle, formatTime, SessionSummary } from "../lib/api";
+import { toast } from "../lib/toast";
 import clsx from "clsx";
 import CommandPalette from "./CommandPalette";
 import ShortcutsOverlay from "./ShortcutsOverlay";
@@ -94,8 +95,9 @@ function SessionRow({ s, isActive, isLive }: { s: SessionSummary; isActive: bool
     try {
       await api.renameSession(s.sessionId, v);
       qc.invalidateQueries({ queryKey: ["recent-sessions"] });
+      toast.success("Renamed");
     } catch (e) {
-      console.error("rename failed", e);
+      toast.error("Rename failed", { description: (e as Error).message });
     }
   };
 
@@ -105,9 +107,10 @@ function SessionRow({ s, isActive, isLive }: { s: SessionSummary; isActive: bool
       await api.deleteSession(s.sessionId);
       qc.invalidateQueries({ queryKey: ["recent-sessions"] });
       setConfirmDelete(false);
+      toast.success("Session deleted");
       if (isActive) navigate("/chat");
     } catch (e) {
-      console.error("delete failed", e);
+      toast.error("Delete failed", { description: (e as Error).message });
       setDeleting(false);
     }
   };
