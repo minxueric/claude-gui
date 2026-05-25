@@ -69,6 +69,7 @@ export interface ChatStreamState {
   mode: string;
   sessionMissing?: boolean;
   lastEventAt?: number;
+  turnStartedAt?: number;   // ms since epoch when current turn began (backend-anchored)
 }
 
 interface Entry {
@@ -103,6 +104,40 @@ function openStream(chatId: string, e: Entry) {
   e.es = es;
   updateState(chatId, (s) => ({ ...s, status: "open" }));
 
+  // Hydrate snapshot: if the backend is mid-turn (because the user refreshed
+  // while Claude was working), restore status / turn start / outstanding
+  // permission and AskUserQuestion prompts so the UI continues seamlessly.
+  (async () => {
+    try {
+      const r = await fetch(`/api/chat/${chatId}/state`);
+      if (!r.ok) return;
+      const snap = await r.json();
+      updateState(chatId, (s) => {
+        const next: ChatStreamState = { ...s };
+        if (snap.turnActive) {
+          next.status = "running";
+          if (snap.turnStartedAt) next.turnStartedAt = snap.turnStartedAt * 1000;
+        }
+        const perms: PermissionRequest[] = (snap.pendingPermissions || []).map((p: any) => ({
+          requestId: p.requestId,
+          toolName: p.toolName,
+          input: p.input,
+        }));
+        if (perms.length) {
+          next.pendingQueue = perms;
+          next.pending = perms[0];
+        }
+        if (snap.pendingAsk) {
+          next.askPending = {
+            requestId: snap.pendingAsk.requestId,
+            questions: snap.pendingAsk.input?.questions || [],
+          };
+        }
+        return next;
+      });
+    } catch { /* ignore — non-fatal */ }
+  })();
+
   let probed = false;
   const probeMissing = async () => {
     if (probed) return;
@@ -136,6 +171,7 @@ function openStream(chatId: string, e: Entry) {
     updateState(chatId, (s) => ({
       ...s,
       status: "idle",
+      turnStartedAt: undefined,
       lastEventAt: Date.now(),
       turns: [
         ...s.turns,
@@ -175,13 +211,13 @@ function openStream(chatId: string, e: Entry) {
   es.addEventListener("error", (ev: MessageEvent) => {
     try {
       const d = JSON.parse((ev as any).data || "{}");
-      updateState(chatId, (s) => ({ ...s, status: "error", error: d.message, pending: undefined, pendingQueue: [], askPending: undefined, lastEventAt: Date.now() }));
+      updateState(chatId, (s) => ({ ...s, status: "error", error: d.message, pending: undefined, pendingQueue: [], askPending: undefined, turnStartedAt: undefined, lastEventAt: Date.now() }));
     } catch {
-      updateState(chatId, (s) => ({ ...s, status: "error", pending: undefined, pendingQueue: [], askPending: undefined, lastEventAt: Date.now() }));
+      updateState(chatId, (s) => ({ ...s, status: "error", pending: undefined, pendingQueue: [], askPending: undefined, turnStartedAt: undefined, lastEventAt: Date.now() }));
     }
   });
   es.addEventListener("done", () => {
-    updateState(chatId, (s) => ({ ...s, status: "idle", pending: undefined, pendingQueue: [], askPending: undefined, lastEventAt: Date.now() }));
+    updateState(chatId, (s) => ({ ...s, status: "idle", pending: undefined, pendingQueue: [], askPending: undefined, turnStartedAt: undefined, lastEventAt: Date.now() }));
   });
 }
 
@@ -247,6 +283,7 @@ export function useChatStream(chatId: string | null, initialMode: string = "defa
         ...s,
         status: "running",
         lastEventAt: Date.now(),
+        turnStartedAt: Date.now(),
         turns: [...s.turns, { role: "user", blocks: userBlocks, ts: Date.now() / 1000 }],
       }));
       const r = await fetch(`/api/chat/${chatId}/input`, {

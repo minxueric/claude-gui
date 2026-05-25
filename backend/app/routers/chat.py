@@ -183,6 +183,36 @@ async def usage(chat_id: str) -> dict:
     return s._usage_snapshot()
 
 
+@router.get("/chat/{chat_id}/state")
+async def state(chat_id: str) -> dict:
+    """Snapshot the session's current pump status + outstanding permission /
+    AskUserQuestion requests so a reconnecting client (after a page refresh)
+    can re-render the working indicator and any open prompts."""
+    s = registry.get(chat_id)
+    if s is None:
+        raise HTTPException(404, "chat not found")
+    permissions = []
+    asks = []
+    for req in s.pending_requests.values():
+        if req.get("kind") == "ask":
+            asks.append({"requestId": req["requestId"], "input": req.get("input")})
+        else:
+            permissions.append({
+                "requestId": req["requestId"],
+                "toolName": req.get("toolName"),
+                "input": req.get("input"),
+            })
+    return {
+        "turnActive": bool(s._turn_active),
+        "turnStartedAt": s._turn_started_at,  # epoch seconds, or null
+        "permissionMode": s.permission_mode,
+        "effort": s.effort,
+        "model": s.last_model,
+        "pendingPermissions": permissions,
+        "pendingAsk": asks[0] if asks else None,
+    }
+
+
 @router.get("/chat/{chat_id}/mcp")
 async def mcp(chat_id: str) -> dict:
     s = registry.get(chat_id)

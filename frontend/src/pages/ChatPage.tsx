@@ -470,6 +470,7 @@ export default function ChatPage() {
             status={state.status}
             onInterrupt={interrupt}
             lastEventAt={state.lastEventAt}
+            turnStartedAt={state.turnStartedAt}
           />
         </div>
 

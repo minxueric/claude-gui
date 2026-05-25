@@ -29,6 +29,7 @@ interface Props {
   status?: "idle" | "open" | "running" | "done" | "error";
   onInterrupt?: () => void | Promise<void>;
   lastEventAt?: number;
+  turnStartedAt?: number;
 }
 
 function detectTrigger(text: string, caret: number): { kind: "/" | "@" | "!" | "#"; query: string; start: number } | null {
@@ -84,7 +85,7 @@ export interface ComposerHandle {
 }
 
 function ComposerImpl(
-  { cwd, mode, onCycleMode, onSelectMode, effort, onSelectEffort, model, onSelectModel, onSend, status, onInterrupt, lastEventAt }: Props,
+  { cwd, mode, onCycleMode, onSelectMode, effort, onSelectEffort, model, onSelectModel, onSend, status, onInterrupt, lastEventAt, turnStartedAt }: Props,
   ref: React.Ref<ComposerHandle>
 ) {
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -379,7 +380,7 @@ function ComposerImpl(
 
         {memoStatus && <span className="text-[11px] italic text-orange-500">{memoStatus}</span>}
 
-        {isRunning && <WorkingIndicator lastEventAt={lastEventAt} onInterrupt={onInterrupt} />}
+        {isRunning && <WorkingIndicator lastEventAt={lastEventAt} turnStartedAt={turnStartedAt} onInterrupt={onInterrupt} />}
 
         {isRunning ? (
           <button
@@ -614,19 +615,22 @@ function fmtElapsed(sec: number): string {
   return rm ? `${h}h ${rm}m` : `${h}h`;
 }
 
-function WorkingIndicator({ lastEventAt, onInterrupt }: { lastEventAt?: number; onInterrupt?: () => void | Promise<void> }) {
+function WorkingIndicator({ lastEventAt, turnStartedAt, onInterrupt }: { lastEventAt?: number; turnStartedAt?: number; onInterrupt?: () => void | Promise<void> }) {
   const [idx, setIdx] = useState(() => Math.floor(Math.random() * WORKING_VERBS.length));
   const [elapsed, setElapsed] = useState(0);
   const [silenceSec, setSilenceSec] = useState(0);
-  // startedAt is captured once when the indicator first appears (mount). We
-  // must NOT reset it whenever lastEventAt changes — otherwise every SSE
-  // event (assistant_message / usage / ping ...) would snap elapsed back to
-  // 0 and the timer would visibly restart.
-  const startedAt = useRef<number>(Date.now());
+  // Anchor elapsed to the backend-provided turn start (survives refresh).
+  // Fall back to local mount time if the backend didn't surface it (e.g. a
+  // brand-new session where the SSE event arrives before /state).
+  const startedAt = useRef<number>(turnStartedAt ?? Date.now());
+  // If turnStartedAt arrives later (post-hydrate), adopt it.
+  useEffect(() => {
+    if (turnStartedAt && Math.abs((turnStartedAt - startedAt.current)) > 500) {
+      startedAt.current = turnStartedAt;
+      setElapsed(Math.floor((Date.now() - turnStartedAt) / 1000));
+    }
+  }, [turnStartedAt]);
   const lastEventAtRef = useRef<number | undefined>(lastEventAt);
-
-  // Keep latest lastEventAt readable from the ticker without re-binding the
-  // interval (otherwise the interval would be torn down on every event).
   useEffect(() => { lastEventAtRef.current = lastEventAt; }, [lastEventAt]);
 
   useEffect(() => {

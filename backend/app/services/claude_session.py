@@ -120,8 +120,13 @@ class ChatSession:
         self.client: ClaudeSDKClient | None = None
         self.queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=1024)
         self.permission_waiters: dict[str, asyncio.Future] = {}
+        # Snapshot of each outstanding permission/ask request so a reconnecting
+        # client (after a page refresh) can re-render the prompts without
+        # having missed the original SSE event.
+        self.pending_requests: dict[str, dict] = {}
         self.pump_task: asyncio.Task | None = None
         self.created = time.time()
+        self._turn_started_at: float | None = None
         self.session_id: str | None = None
         self._closed = False
         self.permission_mode: str = options.permission_mode or "default"
@@ -180,12 +185,18 @@ class ChatSession:
             loop = asyncio.get_event_loop()
             fut: asyncio.Future = loop.create_future()
             self.permission_waiters[request_id] = fut
+            snap_input = _sanitize(tool_input)
+            self.pending_requests[request_id] = {
+                "kind": "ask",
+                "requestId": request_id,
+                "input": snap_input,
+            }
             await self._put(
                 {
                     "event": "ask_user_question",
                     "data": {
                         "requestId": request_id,
-                        "input": _sanitize(tool_input),
+                        "input": snap_input,
                     },
                 }
             )
@@ -193,6 +204,7 @@ class ChatSession:
                 decision = await fut
             finally:
                 self.permission_waiters.pop(request_id, None)
+                self.pending_requests.pop(request_id, None)
             # Build the formatted answer string Claude expects.
             answers = decision.get("answers") or {}
             parts = []
@@ -212,6 +224,13 @@ class ChatSession:
         fut: asyncio.Future = loop.create_future()
         self.permission_waiters[request_id] = fut
         log.info("can_use_tool[%s] request_id=%s tool=%s mode=%s", self.chat_id[:8], request_id, tool_name, mode)
+        snap_input = _sanitize(tool_input)
+        self.pending_requests[request_id] = {
+            "kind": "permission",
+            "requestId": request_id,
+            "toolName": tool_name,
+            "input": snap_input,
+        }
         # Drop suggestions — they're SDK PermissionUpdate objects that aren't
         # JSON-serializable. The frontend doesn't use them anyway.
         await self._put(
@@ -220,7 +239,7 @@ class ChatSession:
                 "data": {
                     "requestId": request_id,
                     "toolName": tool_name,
-                    "input": _sanitize(tool_input),
+                    "input": snap_input,
                 },
             }
         )
@@ -228,6 +247,7 @@ class ChatSession:
             decision = await fut
         finally:
             self.permission_waiters.pop(request_id, None)
+            self.pending_requests.pop(request_id, None)
         log.info("can_use_tool[%s] resolved request_id=%s decision=%s", self.chat_id[:8], request_id, decision.get("decision"))
         if decision.get("decision") == "allow" or decision.get("decision") == "allow_once":
             upd = decision.get("updatedInput")
@@ -248,6 +268,7 @@ class ChatSession:
                 content = self._pending_content
                 self._pending_content = None
                 self._turn_active = True
+                self._turn_started_at = time.time()
 
                 # Issue query then drain this turn's messages.
                 try:
@@ -286,6 +307,7 @@ class ChatSession:
                     await self._put({"event": "error", "data": {"message": str(e)}})
                 finally:
                     self._turn_active = False
+                    self._turn_started_at = None
         finally:
             await self._put({"event": "done", "data": {}})
 
