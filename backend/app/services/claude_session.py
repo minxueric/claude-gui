@@ -169,6 +169,41 @@ class ChatSession:
             return PermissionResultAllow(updated_input=tool_input)
         if mode == "acceptEdits" and tool_name in self._EDIT_LIKE_TOOLS:
             return PermissionResultAllow(updated_input=tool_input)
+
+        # AskUserQuestion is a special CLI-builtin "ask the user" tool whose
+        # result is just a formatted answer string. We render an interactive
+        # picker in the GUI, then synthesize the answer string back to Claude
+        # via PermissionResultDeny(message=...). Deny-with-message is the SDK
+        # path that produces an arbitrary tool_result string for the model.
+        if tool_name == "AskUserQuestion":
+            request_id = uuid.uuid4().hex
+            loop = asyncio.get_event_loop()
+            fut: asyncio.Future = loop.create_future()
+            self.permission_waiters[request_id] = fut
+            await self._put(
+                {
+                    "event": "ask_user_question",
+                    "data": {
+                        "requestId": request_id,
+                        "input": _sanitize(tool_input),
+                    },
+                }
+            )
+            try:
+                decision = await fut
+            finally:
+                self.permission_waiters.pop(request_id, None)
+            # Build the formatted answer string Claude expects.
+            answers = decision.get("answers") or {}
+            parts = []
+            for q, a in answers.items():
+                parts.append(f'"{q}"="{a}"')
+            if parts:
+                msg = "User has answered your questions: " + ", ".join(parts) + ". You can now continue with the user's answers in mind."
+            else:
+                msg = decision.get("message", "User did not answer.")
+            return PermissionResultDeny(message=msg)
+
         # plan mode: SDK itself enforces read-only; we still surface the prompt
         # so the user can deny if needed. default mode: always ask.
 
@@ -348,7 +383,7 @@ class ChatSession:
                 return None
         return None
 
-    async def respond_permission(self, request_id: str, decision: str, updated_input: dict | None = None, message: str = "") -> bool:
+    async def respond_permission(self, request_id: str, decision: str, updated_input: dict | None = None, message: str = "", answers: dict | None = None) -> bool:
         fut = self.permission_waiters.get(request_id)
         log.info(
             "respond_permission[%s] request_id=%s decision=%s found=%s done=%s",
@@ -357,7 +392,7 @@ class ChatSession:
         )
         if fut is None or fut.done():
             return False
-        fut.set_result({"decision": decision, "updatedInput": updated_input, "message": message})
+        fut.set_result({"decision": decision, "updatedInput": updated_input, "message": message, "answers": answers})
         return True
 
     async def interrupt(self) -> None:

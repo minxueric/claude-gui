@@ -32,6 +32,19 @@ export interface PermissionRequest {
   suggestions?: any;
 }
 
+// AskUserQuestion is rendered as an inline interactive picker instead of the
+// generic permission flow.
+export interface AskQuestion {
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options: { label: string; description?: string }[];
+}
+export interface AskUserQuestionRequest {
+  requestId: string;
+  questions: AskQuestion[];
+}
+
 export interface UsageTotals {
   input_tokens: number;
   output_tokens: number;
@@ -49,12 +62,13 @@ export interface ChatStreamState {
   turns: ChatTurn[];
   pending?: PermissionRequest;          // head of pendingQueue, surfaced for UI
   pendingQueue?: PermissionRequest[];   // FIFO of all outstanding permission requests
+  askPending?: AskUserQuestionRequest;  // current AskUserQuestion request
   status: "idle" | "open" | "running" | "done" | "error";
   error?: string;
   usage?: UsageSnapshot;
   mode: string;
   sessionMissing?: boolean;
-  lastEventAt?: number;   // ms since epoch; updated on every SSE event
+  lastEventAt?: number;
 }
 
 interface Entry {
@@ -149,17 +163,25 @@ function openStream(chatId: string, e: Entry) {
       return { ...s, pendingQueue: q, pending: q[0], lastEventAt: Date.now() };
     });
   });
+  es.addEventListener("ask_user_question", (ev: MessageEvent) => {
+    const d = JSON.parse(ev.data) as { requestId: string; input: { questions?: AskQuestion[] } };
+    const req: AskUserQuestionRequest = {
+      requestId: d.requestId,
+      questions: d.input?.questions || [],
+    };
+    updateState(chatId, (s) => ({ ...s, askPending: req, lastEventAt: Date.now() }));
+  });
   es.addEventListener("ping", () => { bump(); });
   es.addEventListener("error", (ev: MessageEvent) => {
     try {
       const d = JSON.parse((ev as any).data || "{}");
-      updateState(chatId, (s) => ({ ...s, status: "error", error: d.message, pending: undefined, pendingQueue: [], lastEventAt: Date.now() }));
+      updateState(chatId, (s) => ({ ...s, status: "error", error: d.message, pending: undefined, pendingQueue: [], askPending: undefined, lastEventAt: Date.now() }));
     } catch {
-      updateState(chatId, (s) => ({ ...s, status: "error", pending: undefined, pendingQueue: [], lastEventAt: Date.now() }));
+      updateState(chatId, (s) => ({ ...s, status: "error", pending: undefined, pendingQueue: [], askPending: undefined, lastEventAt: Date.now() }));
     }
   });
   es.addEventListener("done", () => {
-    updateState(chatId, (s) => ({ ...s, status: "idle", pending: undefined, pendingQueue: [], lastEventAt: Date.now() }));
+    updateState(chatId, (s) => ({ ...s, status: "idle", pending: undefined, pendingQueue: [], askPending: undefined, lastEventAt: Date.now() }));
   });
 }
 
@@ -268,6 +290,21 @@ export function useChatStream(chatId: string | null, initialMode: string = "defa
     [chatId]
   );
 
+  const respondAskUserQuestion = useCallback(
+    async (answers: Record<string, string>) => {
+      if (!chatId) return;
+      const req = stateRef.current.askPending;
+      if (!req) return;
+      await fetch(`/api/chat/${chatId}/permission`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId: req.requestId, decision: "answer", answers }),
+      });
+      updateState(chatId, (s) => ({ ...s, askPending: undefined }));
+    },
+    [chatId]
+  );
+
   const interrupt = useCallback(async () => {
     if (!chatId) return;
     await fetch(`/api/chat/${chatId}/interrupt`, { method: "POST" });
@@ -309,7 +346,7 @@ export function useChatStream(chatId: string | null, initialMode: string = "defa
     // No-op; useSyncExternalStore + subscribe handle attach/detach.
   }, [chatId]);
 
-  return { state, sendInput, respondPermission, interrupt, setMode, setTurns };
+  return { state, sendInput, respondPermission, respondAskUserQuestion, interrupt, setMode, setTurns };
 }
 
 const EMPTY: ChatStreamState = { turns: [], status: "idle", mode: "default" };

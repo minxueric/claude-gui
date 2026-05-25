@@ -48,7 +48,7 @@ export default function ChatPage() {
   const { data: projects } = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const [showFiles, setShowFiles] = useState(false);
 
-  const { state, sendInput, respondPermission, interrupt, setMode, setTurns } = useChatStream(chatId, permissionMode);
+  const { state, sendInput, respondPermission, respondAskUserQuestion, interrupt, setMode, setTurns } = useChatStream(chatId, permissionMode);
 
   // History turns from JSONL polling (independent of the SSE store, so that
   // resumed sessions show their history even before the backend chat session
@@ -402,6 +402,8 @@ export default function ChatPage() {
                       cwd={cwd}
                       pending={isLast ? state.pending : undefined}
                       onDecide={isLast ? respondPermission : undefined}
+                      askPending={isLast ? state.askPending : undefined}
+                      onAnswer={isLast ? respondAskUserQuestion : undefined}
                     />
                   </div>
                 );

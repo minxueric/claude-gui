@@ -121,9 +121,10 @@ class ChatInputRequest(BaseModel):
 
 class ChatPermissionRequest(BaseModel):
     requestId: str
-    decision: str  # allow | deny | allow_once
+    decision: str  # allow | deny | allow_once | answer
     updatedInput: Optional[dict[str, Any]] = None
     message: Optional[str] = None
+    answers: Optional[dict[str, str]] = None  # for AskUserQuestion: question -> selected label
 
 
 class ChatPermissionModeRequest(BaseModel):

@@ -1,9 +1,10 @@
 import { useState, useMemo } from "react";
-import { ChatTurn, ChatBlock, PermissionRequest } from "../../hooks/useChatStream";
+import { ChatTurn, ChatBlock, PermissionRequest, AskUserQuestionRequest } from "../../hooks/useChatStream";
 import MarkdownBlock from "../blocks/MarkdownBlock";
 import ThinkingBlock from "../blocks/ThinkingBlock";
 import EditDiffBlock from "../blocks/EditDiffBlock";
 import PermissionPrompt from "./PermissionPrompt";
+import AskUserQuestionPrompt from "./AskUserQuestionPrompt";
 import { useFilePreview } from "./FilePreviewContext";
 
 const DIFF_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
@@ -13,6 +14,8 @@ interface Props {
   cwd?: string;
   pending?: PermissionRequest;
   onDecide?: (d: "allow" | "deny" | "allow_once", message?: string) => void;
+  askPending?: AskUserQuestionRequest;
+  onAnswer?: (answers: Record<string, string>) => void;
 }
 
 interface StepItem {
@@ -57,7 +60,7 @@ function resultPreview(content: any): { line: string; lineCount: number; chars: 
   return { line, lineCount, chars: text.length, text };
 }
 
-export default function AssistantTurnGroup({ turns, cwd, pending, onDecide }: Props) {
+export default function AssistantTurnGroup({ turns, cwd, pending, onDecide, askPending, onAnswer }: Props) {
   const filePreview = useFilePreview();
   const steps: StepItem[] = useMemo(() => {
     const out: StepItem[] = [];
@@ -325,6 +328,11 @@ export default function AssistantTurnGroup({ turns, cwd, pending, onDecide }: Pr
           {pending && onDecide && (
             <ol className="space-y-1">
               <PermissionPrompt req={pending} onDecide={onDecide} cwd={cwd} />
+            </ol>
+          )}
+          {askPending && onAnswer && (
+            <ol className="space-y-1">
+              <AskUserQuestionPrompt req={askPending} onAnswer={onAnswer} />
             </ol>
           )}
         </div>

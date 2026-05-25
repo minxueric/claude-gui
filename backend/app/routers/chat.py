@@ -144,7 +144,7 @@ async def respond_permission(chat_id: str, req: ChatPermissionRequest) -> dict:
     s = registry.get(chat_id)
     if s is None:
         raise HTTPException(404, "chat not found")
-    ok = await s.respond_permission(req.requestId, req.decision, req.updatedInput, req.message or "")
+    ok = await s.respond_permission(req.requestId, req.decision, req.updatedInput, req.message or "", req.answers)
     return {"ok": ok}
 
 
