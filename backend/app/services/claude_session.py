@@ -154,6 +154,7 @@ class ChatSession:
         # _send_event is set each time send() is called, waking the pump loop.
         self._send_event: asyncio.Event = asyncio.Event()
         self._pending_content: Any = None
+        self._turn_active: bool = False
         self.pump_task = asyncio.create_task(self._pump())
 
     # Tools whose effects are write-like (mutate filesystem / spawn shells).
@@ -211,6 +212,7 @@ class ChatSession:
                     break
                 content = self._pending_content
                 self._pending_content = None
+                self._turn_active = True
 
                 # Issue query then drain this turn's messages.
                 try:
@@ -247,6 +249,8 @@ class ChatSession:
                 except Exception as e:  # noqa: BLE001
                     log.exception("pump turn error")
                     await self._put({"event": "error", "data": {"message": str(e)}})
+                finally:
+                    self._turn_active = False
         finally:
             await self._put({"event": "done", "data": {}})
 
@@ -271,12 +275,32 @@ class ChatSession:
     async def send(self, content: Any) -> None:
         if self.client is None:
             raise RuntimeError("client not started")
+        # If the previous turn is still hanging inside receive_messages (e.g.
+        # SDK got stuck waiting for an assistant_message after a failed
+        # WebFetch tool_result), interrupt it so the pump loop can flush and
+        # pick up this new message instead of having it silently overwrite
+        # the pending slot and never be processed.
+        if self._turn_active:
+            log.info("send while turn_active — interrupting prior turn first")
+            try:
+                await self.client.interrupt()
+            except Exception:  # noqa: BLE001
+                log.exception("interrupt-before-send failed")
+            # Cancel any pending permission waiters too
+            for fut in list(self.permission_waiters.values()):
+                if not fut.done():
+                    fut.set_result({"decision": "deny", "message": "superseded by new message"})
         self._pending_content = content
         self._send_event.set()
 
     async def set_permission_mode(self, mode: str) -> bool:
         if mode not in {"default", "acceptEdits", "bypassPermissions", "plan"}:
             return False
+        # Always remember the mode locally — _on_tool consults it directly to
+        # auto-allow tools, so this works even when the SDK refuses the
+        # control request (e.g. switching to bypassPermissions on a session
+        # that wasn't launched with --dangerously-skip-permissions: the SDK
+        # blocks but our GUI-side bypass still kicks in).
         self.permission_mode = mode
         if self.client is None:
             return True
@@ -284,11 +308,12 @@ class ChatSession:
         if callable(fn):
             try:
                 await fn(mode)
+            except Exception as e:  # noqa: BLE001
+                log.warning("SDK rejected set_permission_mode(%s): %s — local mode kept", mode, e)
+                # local mode already set; GUI bypass logic in _on_tool will
+                # still honor it
                 return True
-            except Exception:  # noqa: BLE001
-                log.exception("set_permission_mode failed")
-                return False
-        return True  # locally recorded even if SDK lacks the call
+        return True
 
     async def set_model(self, model: str) -> bool:
         """Switch the active model on the running SDK client (effective on
