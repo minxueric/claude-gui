@@ -273,6 +273,15 @@ export const api = {
     if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
     return r.json() as Promise<{ ok: boolean; effort: string | null }>;
   },
+  setModel: async (chatId: string, model: string) => {
+    const r = await fetch(`/api/chat/${chatId}/model`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json() as Promise<{ ok: boolean; model: string | null }>;
+  },
   chatUsage: (chatId: string) =>
     get<{ totals: Record<string, number>; model: string | null }>(`/api/chat/${chatId}/usage`),
   chatMcp: (chatId: string) =>

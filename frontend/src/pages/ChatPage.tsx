@@ -11,15 +11,6 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { messagesToTurns } from "../lib/messagesToTurns";
 
-const EFFORT_OPTIONS = [
-  { value: "", label: "Default", desc: "Standard" },
-  { value: "low", label: "Low", desc: "Faster, less thinking" },
-  { value: "medium", label: "Medium", desc: "Balanced" },
-  { value: "high", label: "High", desc: "More thorough" },
-  { value: "xhigh", label: "X-High", desc: "Extended thinking" },
-  { value: "max", label: "Max", desc: "Maximum reasoning" },
-] as const;
-
 export default function ChatPage() {
   const [params] = useSearchParams();
   const resume = params.get("resume") || undefined;
@@ -31,6 +22,10 @@ export default function ChatPage() {
   const [permissionMode, setPermissionMode] = useState("default");
   const [effort, setEffort] = useState("");
   const [starting, setStarting] = useState(false);
+  // `ready` flips to true when the user clicks Start chat — switches the page
+  // from the start form into the regular chat UI without creating a backend
+  // session (SDK is launched lazily on first send).
+  const [ready, setReady] = useState(false);
 
   const { data: projects } = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const [showFiles, setShowFiles] = useState(false);
@@ -192,28 +187,26 @@ export default function ChatPage() {
   const cycleMode = () => setMode(nextMode(state.mode));
 
   // ── Start form ─────────────────────────────────────────────────────────────
-  // Skip the start form for resumed sessions — we have history & cwd already,
-  // and the backend session is created lazily on first send.
-  if (!chatId && !resume) {
+  // Show the minimal "pick a working directory" form only when:
+  //   - we are NOT resuming an existing session (resume already provides cwd)
+  //   - we haven't yet committed a fresh New Chat (ready === false)
+  //   - no backend chatId exists yet
+  // Lazy start: clicking Start chat just flips `ready` to true; the actual
+  // backend session is created on first send (see lazy-start effect below).
+  if (!chatId && !resume && !ready) {
     return (
       <div className="h-full flex items-center justify-center px-8 py-10 bg-white">
         <form
-          onSubmit={(e) => { e.preventDefault(); start(); }}
-          className="w-full max-w-xl animate-rise"
+          onSubmit={(e) => { e.preventDefault(); if (cwd) setReady(true); }}
+          className="w-full max-w-md animate-rise"
         >
-          <h1 className="text-[24px] font-semibold text-gray-900 mb-1">New chat</h1>
-          <p className="text-[13px] text-gray-400 mb-7">Start a Claude Code session in any directory.</p>
+          <h1 className="text-[24px] font-semibold text-gray-900 mb-1">Start a chat</h1>
+          <p className="text-[13px] text-gray-400 mb-6">
+            Pick a working directory. You can change model, mode, and thinking
+            effort right from the chat input.
+          </p>
 
-          {resume && (
-            <p className="text-gray-600 mb-5 text-[13px]">
-              Resuming{" "}
-              <span className="font-mono text-[11px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded">
-                {resume.slice(0, 8)}
-              </span>
-            </p>
-          )}
-
-          <div className="space-y-3 bg-gray-50 border border-gray-200 rounded-xl p-5">
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
             <Field label="Working directory">
               <div className="flex gap-2">
                 <input
@@ -222,6 +215,7 @@ export default function ChatPage() {
                   onChange={(e) => setCwd(e.target.value)}
                   placeholder="/Users/you/Code/your-project"
                   className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2 text-[13px] font-mono outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-colors"
+                  autoFocus
                 />
                 <button
                   type="button"
@@ -241,63 +235,13 @@ export default function ChatPage() {
                 {projects?.map((p) => <option key={p.encoded} value={p.cwd} />)}
               </datalist>
             </Field>
-
-            <Field label="Model">
-              <input
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="default (claude-opus-4-7)"
-                className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-[13px] font-mono outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-colors"
-              />
-            </Field>
-
-            {/* Effort selector */}
-            <Field label="Thinking effort">
-              <div className="grid grid-cols-3 gap-1.5">
-                {EFFORT_OPTIONS.map((o) => (
-                  <button
-                    key={o.value}
-                    type="button"
-                    onClick={() => setEffort(o.value)}
-                    className={`px-3 py-2 rounded-lg border text-left transition-colors ${
-                      effort === o.value
-                        ? "border-orange-400 bg-orange-50 text-orange-700"
-                        : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
-                    }`}
-                  >
-                    <div className="text-[12px] font-medium">{o.label}</div>
-                    <div className="text-[10px] text-gray-400 mt-0.5">{o.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </Field>
-
-            {/* Permission mode */}
-            <Field label="Permission mode">
-              <div className="grid grid-cols-4 gap-1.5">
-                {(["default", "acceptEdits", "bypassPermissions", "plan"] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setPermissionMode(m)}
-                    className={`px-2 py-2 rounded-lg border text-center transition-colors ${
-                      permissionMode === m
-                        ? "border-orange-400 bg-orange-50 text-orange-700"
-                        : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-                    }`}
-                  >
-                    <div className="text-[11px] font-medium leading-snug">{m}</div>
-                  </button>
-                ))}
-              </div>
-            </Field>
           </div>
 
           <button
-            disabled={!cwd || starting}
+            disabled={!cwd}
             className="mt-4 w-full bg-orange-500 hover:bg-orange-600 text-white font-medium py-3 rounded-xl disabled:opacity-50 transition-colors text-[14px] inline-flex items-center justify-center gap-2"
           >
-            {starting ? "Starting…" : "Start chat →"}
+            Start chat →
           </button>
         </form>
       </div>
@@ -437,6 +381,8 @@ export default function ChatPage() {
             onSelectMode={(m) => setMode(m)}
             effort={effort}
             onSelectEffort={(e) => { setEffort(e); if (chatId) void api.setEffort(chatId, e); }}
+            model={model}
+            onSelectModel={(m) => { setModel(m); if (chatId) void api.setModel(chatId, m); }}
             onSend={onSend}
             status={state.status}
             onInterrupt={interrupt}

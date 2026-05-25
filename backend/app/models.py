@@ -132,3 +132,7 @@ class ChatPermissionModeRequest(BaseModel):
 
 class ChatEffortRequest(BaseModel):
     effort: str = ""  # "" | low | medium | high | xhigh | max
+
+
+class ChatModelRequest(BaseModel):
+    model: str = ""  # "" means SDK default

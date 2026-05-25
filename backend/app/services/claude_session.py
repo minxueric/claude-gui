@@ -276,6 +276,24 @@ class ChatSession:
                 return False
         return True  # locally recorded even if SDK lacks the call
 
+    async def set_model(self, model: str) -> bool:
+        """Switch the active model on the running SDK client (effective on
+        subsequent turns). Empty string falls back to the SDK default."""
+        if self.client is None:
+            return False
+        fn = getattr(self.client, "set_model", None)
+        if not callable(fn):
+            return False
+        try:
+            res = fn(model or None)
+            if asyncio.iscoroutine(res):
+                await res
+            self.last_model = model or None
+            return True
+        except Exception:  # noqa: BLE001
+            log.exception("set_model failed")
+            return False
+
     async def get_mcp_status(self) -> Any:
         if self.client is None:
             return None

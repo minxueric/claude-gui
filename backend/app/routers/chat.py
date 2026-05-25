@@ -15,6 +15,7 @@ from ..indexer import scanner
 from ..models import (
     ChatEffortRequest,
     ChatInputRequest,
+    ChatModelRequest,
     ChatPermissionModeRequest,
     ChatPermissionRequest,
     ChatStartRequest,
@@ -121,6 +122,15 @@ async def set_effort(chat_id: str, req: ChatEffortRequest) -> dict:
         raise HTTPException(404, "chat not found")
     s.effort = req.effort or None
     return {"ok": True, "effort": s.effort}
+
+
+@router.post("/chat/{chat_id}/model")
+async def set_model(chat_id: str, req: ChatModelRequest) -> dict:
+    s = registry.get(chat_id)
+    if s is None:
+        raise HTTPException(404, "chat not found")
+    ok = await s.set_model(req.model)
+    return {"ok": ok, "model": s.last_model}
 
 
 @router.get("/chat/{chat_id}/usage")

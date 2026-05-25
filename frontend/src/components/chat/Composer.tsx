@@ -22,6 +22,8 @@ interface Props {
   onSelectMode?: (mode: string) => void; // explicit dropdown selection
   effort?: string;
   onSelectEffort?: (effort: string) => void;
+  model?: string;
+  onSelectModel?: (model: string) => void;
   onSend: (content: string | ChatBlock[]) => void | Promise<void>;
   status?: "idle" | "open" | "running" | "done" | "error";
   onInterrupt?: () => void | Promise<void>;
@@ -80,7 +82,7 @@ export interface ComposerHandle {
 }
 
 function ComposerImpl(
-  { cwd, mode, onCycleMode, onSelectMode, effort, onSelectEffort, onSend, status, onInterrupt }: Props,
+  { cwd, mode, onCycleMode, onSelectMode, effort, onSelectEffort, model, onSelectModel, onSend, status, onInterrupt }: Props,
   ref: React.Ref<ComposerHandle>
 ) {
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -369,6 +371,7 @@ function ComposerImpl(
 
         <ModeDropdown mode={mode} onChange={onSelectMode} />
         <EffortDropdown effort={effort} onChange={onSelectEffort} />
+        <ModelDropdown model={model} onChange={onSelectModel} />
 
         <div className="flex-1" />
 
@@ -482,6 +485,48 @@ function EffortDropdown({ effort, onChange }: { effort?: string; onChange?: (e: 
                 className={"w-full text-left px-3 py-1.5 hover:bg-gray-50 transition-colors " + (o.value === (effort || "") ? "bg-orange-50/60" : "")}
               >
                 <div className={"text-[12px] font-medium " + (o.value === (effort || "") ? "text-orange-700" : "text-gray-800")}>{o.label}</div>
+                <div className="text-[10.5px] text-gray-400 mt-0.5">{o.desc}</div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const MODEL_OPTIONS: { value: string; label: string; desc: string }[] = [
+  { value: "", label: "Default", desc: "SDK default (Opus 4.7)" },
+  { value: "claude-opus-4-7", label: "Opus 4.7", desc: "Most capable" },
+  { value: "claude-sonnet-4-6", label: "Sonnet 4.6", desc: "Balanced" },
+  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", desc: "Fastest" },
+];
+
+function ModelDropdown({ model, onChange }: { model?: string; onChange?: (m: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const cur = MODEL_OPTIONS.find((o) => o.value === (model || "")) || MODEL_OPTIONS[0];
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Model"
+        className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 text-[11px] font-medium transition-colors inline-flex items-center gap-1"
+      >
+        <span>◆ {cur.label}</span>
+        <span className="text-[9px] text-gray-400">▾</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full mb-1 left-0 z-50 w-56 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+            <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Model</div>
+            {MODEL_OPTIONS.map((o) => (
+              <button
+                key={o.value || "default"}
+                onClick={() => { setOpen(false); onChange?.(o.value); }}
+                className={"w-full text-left px-3 py-1.5 hover:bg-gray-50 transition-colors " + (o.value === (model || "") ? "bg-orange-50/60" : "")}
+              >
+                <div className={"text-[12px] font-medium " + (o.value === (model || "") ? "text-orange-700" : "text-gray-800")}>{o.label}</div>
                 <div className="text-[10.5px] text-gray-400 mt-0.5">{o.desc}</div>
               </button>
             ))}
