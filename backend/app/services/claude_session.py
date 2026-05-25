@@ -374,8 +374,12 @@ class ChatSession:
         }
 
     async def send(self, content: Any) -> None:
+        # Lazy-start the SDK on first send for rehydrated (placeholder)
+        # sessions: rehydrate_from_disk leaves client=None so we don't spawn
+        # a process for chats the user may never touch again.
         if self.client is None:
-            raise RuntimeError("client not started")
+            log.info("lazy-starting SDK client for chat %s", self.chat_id[:8])
+            await self.start()
         # If the previous turn is still hanging inside receive_messages (e.g.
         # SDK got stuck waiting for an assistant_message after a failed
         # WebFetch tool_result), interrupt it so the pump loop can flush and
@@ -548,16 +552,23 @@ class ChatRegistry:
             return {}
 
     async def rehydrate_from_disk(self) -> int:
-        """Called on startup. Re-create ChatSession objects for entries in
-        the persisted registry, using `resume=<sessionId>` so the SDK
-        re-attaches to the existing JSONL conversation. Returns the count."""
+        """Called on startup. Re-create *placeholder* ChatSession entries for
+        previously-live chats. We do NOT start a fresh SDK subprocess here:
+        an unfinished prior turn cannot be resumed mid-flight (the SDK has
+        no "continue this turn" primitive), and immediately spawning a
+        client would race with the frontend's lazy-start path. Instead we
+        keep the chatId → metadata association so the frontend's existing
+        sessionStorage lock still maps to a known chat, and the next time
+        the user sends a message we lazily start the SDK with resume=<sid>.
+
+        Returns the count of placeholders restored."""
         persisted = self._load_persisted()
         n = 0
         for chat_id, meta in persisted.items():
             try:
                 sid = meta.get("sessionId")
                 if not sid:
-                    continue  # nothing to resume
+                    continue  # no jsonl to resume — drop
                 opts = ClaudeAgentOptions(
                     cwd=meta.get("cwd") or "",
                     resume=sid,
@@ -569,10 +580,11 @@ class ChatRegistry:
                 s.session_id = sid
                 s.effort = meta.get("effort")
                 s.last_model = meta.get("lastModel")
-                await s.start()
+                # NOTE: do NOT call s.start() here. The SDK client is brought
+                # up on the first user message via ChatSession.start_lazy().
                 self.sessions[chat_id] = s
                 n += 1
-                log.info("rehydrated chat %s (session=%s)", chat_id[:8], sid[:8])
+                log.info("rehydrated placeholder chat %s (session=%s)", chat_id[:8], sid[:8])
             except Exception:  # noqa: BLE001
                 log.exception("failed to rehydrate chat %s", chat_id[:8])
         return n
