@@ -4,6 +4,16 @@
 import { MessageRow } from "../lib/api";
 import { ChatTurn, ChatBlock } from "../hooks/useChatStream";
 
+// CLI injects synthetic user messages wrapped in tags like
+// <local-command-stdout>, <local-command-caveat>, <command-name>,
+// <command-message>, <command-args>, <system-reminder>, <persisted-output>.
+// These are meta plumbing, not real user content — hide them on replay.
+function isMetaMessage(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  return /^<(local-command-|command-(name|message|args|stdout)|system-reminder|persisted-output)/.test(t);
+}
+
 function blockFromRaw(b: any): ChatBlock | null {
   if (!b || typeof b !== "object") return null;
   switch (b.type) {
@@ -36,9 +46,17 @@ export function messagesToTurns(rows: MessageRow[]): ChatTurn[] {
     const content = msg?.content;
     let blocks: ChatBlock[] = [];
     if (typeof content === "string") {
+      if (isMetaMessage(content)) continue;
       blocks = [{ type: "text", text: content }];
     } else if (Array.isArray(content)) {
-      blocks = content.map(blockFromRaw).filter((b): b is ChatBlock => b !== null);
+      blocks = content
+        .map(blockFromRaw)
+        .filter((b): b is ChatBlock => {
+          if (b === null) return false;
+          // Drop user text blocks that are entirely meta plumbing
+          if (b.type === "text" && isMetaMessage(b.text || "")) return false;
+          return true;
+        });
     }
     if (blocks.length === 0) continue;
     // Filter user messages that are entirely tool results — they're paired into assistant turns
