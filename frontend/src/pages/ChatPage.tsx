@@ -392,6 +392,7 @@ export default function ChatPage() {
             onSend={onSend}
             status={state.status}
             onInterrupt={interrupt}
+            lastEventAt={state.lastEventAt}
           />
         </div>
 

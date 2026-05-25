@@ -28,6 +28,7 @@ interface Props {
   onSend: (content: string | ChatBlock[]) => void | Promise<void>;
   status?: "idle" | "open" | "running" | "done" | "error";
   onInterrupt?: () => void | Promise<void>;
+  lastEventAt?: number;
 }
 
 function detectTrigger(text: string, caret: number): { kind: "/" | "@" | "!" | "#"; query: string; start: number } | null {
@@ -83,7 +84,7 @@ export interface ComposerHandle {
 }
 
 function ComposerImpl(
-  { cwd, mode, onCycleMode, onSelectMode, effort, onSelectEffort, model, onSelectModel, onSend, status, onInterrupt }: Props,
+  { cwd, mode, onCycleMode, onSelectMode, effort, onSelectEffort, model, onSelectModel, onSend, status, onInterrupt, lastEventAt }: Props,
   ref: React.Ref<ComposerHandle>
 ) {
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -378,7 +379,7 @@ function ComposerImpl(
 
         {memoStatus && <span className="text-[11px] italic text-orange-500">{memoStatus}</span>}
 
-        {isRunning && <WorkingIndicator />}
+        {isRunning && <WorkingIndicator lastEventAt={lastEventAt} onInterrupt={onInterrupt} />}
 
         {isRunning ? (
           <button
@@ -603,23 +604,46 @@ const WORKING_VERBS: Array<[string, string]> = [
   ["Wrangling", "驯服中"],
 ];
 
-function WorkingIndicator() {
+function WorkingIndicator({ lastEventAt, onInterrupt }: { lastEventAt?: number; onInterrupt?: () => void | Promise<void> }) {
   const [idx, setIdx] = useState(() => Math.floor(Math.random() * WORKING_VERBS.length));
   const [elapsed, setElapsed] = useState(0);
+  const [silenceSec, setSilenceSec] = useState(0);
   const startedAt = useRef(Date.now());
 
   useEffect(() => {
     startedAt.current = Date.now();
     const tickElapsed = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startedAt.current) / 1000));
+      if (lastEventAt) {
+        setSilenceSec(Math.floor((Date.now() - lastEventAt) / 1000));
+      }
     }, 1000);
     const tickVerb = setInterval(() => {
       setIdx(Math.floor(Math.random() * WORKING_VERBS.length));
     }, 3500);
     return () => { clearInterval(tickElapsed); clearInterval(tickVerb); };
-  }, []);
+  }, [lastEventAt]);
 
+  const stuck = silenceSec >= 90;
   const [verb, zh] = WORKING_VERBS[idx];
+
+  if (stuck) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-amber-600">
+        <span className="inline-block w-2 h-2 rounded-full bg-amber-400" />
+        <span>Seems stuck</span>
+        <span className="text-[11px] text-amber-500/80">没响应 {silenceSec}s</span>
+        {onInterrupt && (
+          <button
+            onClick={() => onInterrupt()}
+            className="ml-1 text-[11px] text-red-500 hover:text-red-600 underline font-medium"
+          >
+            Stop &amp; retry
+          </button>
+        )}
+      </span>
+    );
+  }
 
   return (
     <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-orange-500">

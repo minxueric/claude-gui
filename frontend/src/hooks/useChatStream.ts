@@ -53,6 +53,7 @@ export interface ChatStreamState {
   usage?: UsageSnapshot;
   mode: string;
   sessionMissing?: boolean;
+  lastEventAt?: number;   // ms since epoch; updated on every SSE event
 }
 
 interface Entry {
@@ -104,20 +105,23 @@ function openStream(chatId: string, e: Entry) {
     if (es.readyState === EventSource.CLOSED) probeMissing();
   };
 
-  const push = (turn: ChatTurn) =>
-    updateState(chatId, (s) => ({ ...s, turns: [...s.turns, turn], status: "running" }));
+  const bump = () => updateState(chatId, (s) => ({ ...s, lastEventAt: Date.now() }));
 
-  es.addEventListener("user_message", () => {});
+  const push = (turn: ChatTurn) =>
+    updateState(chatId, (s) => ({ ...s, turns: [...s.turns, turn], status: "running", lastEventAt: Date.now() }));
+
+  es.addEventListener("user_message", () => { bump(); });
   es.addEventListener("assistant_message", (ev: MessageEvent) => {
     const d = JSON.parse(ev.data);
     push({ role: "assistant", model: d.model, blocks: d.content, ts: Date.now() / 1000 });
   });
-  es.addEventListener("system", () => {});
+  es.addEventListener("system", () => { bump(); });
   es.addEventListener("result", (ev: MessageEvent) => {
     const d = JSON.parse(ev.data);
     updateState(chatId, (s) => ({
       ...s,
       status: "idle",
+      lastEventAt: Date.now(),
       turns: [
         ...s.turns,
         {
@@ -134,24 +138,24 @@ function openStream(chatId: string, e: Entry) {
   es.addEventListener("usage", (ev: MessageEvent) => {
     try {
       const d = JSON.parse(ev.data) as UsageSnapshot;
-      updateState(chatId, (s) => ({ ...s, usage: d }));
+      updateState(chatId, (s) => ({ ...s, usage: d, lastEventAt: Date.now() }));
     } catch {}
   });
   es.addEventListener("permission_request", (ev: MessageEvent) => {
     const d = JSON.parse(ev.data) as PermissionRequest;
-    updateState(chatId, (s) => ({ ...s, pending: d }));
+    updateState(chatId, (s) => ({ ...s, pending: d, lastEventAt: Date.now() }));
   });
-  es.addEventListener("ping", () => {});
+  es.addEventListener("ping", () => { bump(); });
   es.addEventListener("error", (ev: MessageEvent) => {
     try {
       const d = JSON.parse((ev as any).data || "{}");
-      updateState(chatId, (s) => ({ ...s, status: "error", error: d.message, pending: undefined }));
+      updateState(chatId, (s) => ({ ...s, status: "error", error: d.message, pending: undefined, lastEventAt: Date.now() }));
     } catch {
-      updateState(chatId, (s) => ({ ...s, status: "error", pending: undefined }));
+      updateState(chatId, (s) => ({ ...s, status: "error", pending: undefined, lastEventAt: Date.now() }));
     }
   });
   es.addEventListener("done", () => {
-    updateState(chatId, (s) => ({ ...s, status: "idle", pending: undefined }));
+    updateState(chatId, (s) => ({ ...s, status: "idle", pending: undefined, lastEventAt: Date.now() }));
   });
 }
 
@@ -216,6 +220,7 @@ export function useChatStream(chatId: string | null, initialMode: string = "defa
       updateState(chatId, (s) => ({
         ...s,
         status: "running",
+        lastEventAt: Date.now(),
         turns: [...s.turns, { role: "user", blocks: userBlocks, ts: Date.now() / 1000 }],
       }));
       const r = await fetch(`/api/chat/${chatId}/input`, {

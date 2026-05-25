@@ -156,12 +156,26 @@ class ChatSession:
         self._pending_content: Any = None
         self.pump_task = asyncio.create_task(self._pump())
 
+    # Tools whose effects are write-like (mutate filesystem / spawn shells).
+    # In acceptEdits mode we auto-allow these; in default mode we ask.
+    _EDIT_LIKE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
     async def _on_tool(self, tool_name: str, tool_input: dict, context: Any):
+        # Honor the current permission_mode without round-tripping through the
+        # GUI: bypass and accept-edits never block the SDK.
+        mode = self.permission_mode
+        if mode == "bypassPermissions":
+            return PermissionResultAllow(updated_input=tool_input)
+        if mode == "acceptEdits" and tool_name in self._EDIT_LIKE_TOOLS:
+            return PermissionResultAllow(updated_input=tool_input)
+        # plan mode: SDK itself enforces read-only; we still surface the prompt
+        # so the user can deny if needed. default mode: always ask.
+
         request_id = uuid.uuid4().hex
         loop = asyncio.get_event_loop()
         fut: asyncio.Future = loop.create_future()
         self.permission_waiters[request_id] = fut
-        log.info("can_use_tool[%s] request_id=%s tool=%s", self.chat_id[:8], request_id, tool_name)
+        log.info("can_use_tool[%s] request_id=%s tool=%s mode=%s", self.chat_id[:8], request_id, tool_name, mode)
         # Drop suggestions — they're SDK PermissionUpdate objects that aren't
         # JSON-serializable. The frontend doesn't use them anyway.
         await self._put(
