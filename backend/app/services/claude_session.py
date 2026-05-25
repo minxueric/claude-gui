@@ -7,6 +7,7 @@ queue of normalized SSE-friendly dicts. Tool permission requests pause inside
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -508,6 +509,73 @@ class ChatSession:
 class ChatRegistry:
     def __init__(self) -> None:
         self.sessions: dict[str, ChatSession] = {}
+        # Persist enough metadata for a restarted backend (dev --reload, or a
+        # crash) to rebuild the SDK client and re-attach to the existing
+        # JSONL session. SDK subprocess is gone after a restart — we can only
+        # resume by re-launching `claude --resume <sessionId>`, which the SDK
+        # handles transparently when we pass `resume=`.
+        from .. import config as _cfg
+        self._persist_path = _cfg.GUI_HOME / "registry.json"
+
+    def _persist(self) -> None:
+        """Write the chatId → metadata map. Called whenever a session is
+        created, has its mode/effort/model updated, or is removed."""
+        try:
+            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                chat_id: {
+                    "sessionId": s.session_id,
+                    "cwd": getattr(s.options, "cwd", None),
+                    "model": getattr(s.options, "model", None),
+                    "permissionMode": s.permission_mode,
+                    "effort": s.effort,
+                    "lastModel": s.last_model,
+                }
+                for chat_id, s in self.sessions.items()
+            }
+            tmp = self._persist_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(self._persist_path)
+        except Exception:  # noqa: BLE001
+            log.exception("registry persist failed")
+
+    def _load_persisted(self) -> dict:
+        if not self._persist_path.exists():
+            return {}
+        try:
+            return json.loads(self._persist_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return {}
+
+    async def rehydrate_from_disk(self) -> int:
+        """Called on startup. Re-create ChatSession objects for entries in
+        the persisted registry, using `resume=<sessionId>` so the SDK
+        re-attaches to the existing JSONL conversation. Returns the count."""
+        persisted = self._load_persisted()
+        n = 0
+        for chat_id, meta in persisted.items():
+            try:
+                sid = meta.get("sessionId")
+                if not sid:
+                    continue  # nothing to resume
+                opts = ClaudeAgentOptions(
+                    cwd=meta.get("cwd") or "",
+                    resume=sid,
+                    model=meta.get("model") or None,
+                    permission_mode=meta.get("permissionMode") or "default",
+                    effort=meta.get("effort") or None,
+                )
+                s = ChatSession(chat_id, opts)
+                s.session_id = sid
+                s.effort = meta.get("effort")
+                s.last_model = meta.get("lastModel")
+                await s.start()
+                self.sessions[chat_id] = s
+                n += 1
+                log.info("rehydrated chat %s (session=%s)", chat_id[:8], sid[:8])
+            except Exception:  # noqa: BLE001
+                log.exception("failed to rehydrate chat %s", chat_id[:8])
+        return n
 
     async def create(self, *, cwd: str, resume: str | None, model: str | None,
                      permission_mode: str | None, allowed_tools: list[str] | None,
@@ -527,6 +595,7 @@ class ChatRegistry:
             s.session_id = resume
         await s.start()
         self.sessions[chat_id] = s
+        self._persist()
         return s
 
     def get(self, chat_id: str) -> ChatSession | None:
@@ -536,6 +605,7 @@ class ChatRegistry:
         s = self.sessions.pop(chat_id, None)
         if s:
             await s.close()
+        self._persist()
 
 
 registry = ChatRegistry()

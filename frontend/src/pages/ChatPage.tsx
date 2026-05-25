@@ -139,6 +139,8 @@ export default function ChatPage() {
     enabled: !!resume,
     refetchInterval: 5_000,
     refetchOnWindowFocus: true,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 4000),
   });
 
   const loadedHistoryRef = useRef<string | null>(null);
@@ -366,7 +368,17 @@ export default function ChatPage() {
             <div className="max-w-[1080px] mx-auto w-full">
             {turns.length === 0 && (
               <div className="px-8 py-16 text-gray-400 text-[14px] italic text-center">
-                Waiting for the first message…
+                {resume ? (
+                  historyQ.isError ? (
+                    <span className="text-red-400">Couldn’t reach backend — retrying…</span>
+                  ) : historyQ.isLoading || historyQ.isFetching ? (
+                    "Loading session…"
+                  ) : (
+                    "No messages yet."
+                  )
+                ) : (
+                  "Waiting for the first message…"
+                )}
               </div>
             )}
             {(() => {

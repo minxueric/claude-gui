@@ -154,6 +154,7 @@ async def set_mode(chat_id: str, req: ChatPermissionModeRequest) -> dict:
     if s is None:
         raise HTTPException(404, "chat not found")
     ok = await s.set_permission_mode(req.mode)
+    registry._persist()
     return {"ok": ok, "mode": s.permission_mode}
 
 
@@ -163,6 +164,7 @@ async def set_effort(chat_id: str, req: ChatEffortRequest) -> dict:
     if s is None:
         raise HTTPException(404, "chat not found")
     s.effort = req.effort or None
+    registry._persist()
     return {"ok": True, "effort": s.effort}
 
 
@@ -172,6 +174,7 @@ async def set_model(chat_id: str, req: ChatModelRequest) -> dict:
     if s is None:
         raise HTTPException(404, "chat not found")
     ok = await s.set_model(req.model)
+    registry._persist()
     return {"ok": ok, "model": s.last_model}
 
 

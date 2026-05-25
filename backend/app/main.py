@@ -55,6 +55,15 @@ async def lifespan(app: FastAPI):
 
     stop_event = asyncio.Event()
     watch_task = asyncio.create_task(watcher.watch_loop(stop_event))
+    # Rehydrate any chat sessions that were live before a backend restart —
+    # this is what lets a user refresh their browser (or wait through a dev
+    # --reload) and find their turn still in progress.
+    try:
+        n = await chat_registry.rehydrate_from_disk()
+        if n:
+            log.info("rehydrated %d chat session(s) from registry.json", n)
+    except Exception:  # noqa: BLE001
+        log.exception("registry rehydrate failed")
     try:
         yield
     finally:
@@ -66,11 +75,17 @@ async def lifespan(app: FastAPI):
             pass
         # Tear down any live ChatSessions so their SDK subprocesses don't
         # outlive the FastAPI process (matters under `uvicorn --reload`).
-        for chat_id in list(chat_registry.sessions.keys()):
+        # Use close() directly (not registry.remove()) so the persisted
+        # registry.json file survives — rehydrate_from_disk() on the next
+        # startup will use it to rebuild the sessions.
+        for chat_id, s in list(chat_registry.sessions.items()):
             try:
-                await chat_registry.remove(chat_id)
+                await s.close()
             except Exception:  # noqa: BLE001
                 log.exception("failed to close chat %s on shutdown", chat_id)
+        # Persist the final state explicitly so registry.json reflects the
+        # last known mode/effort/model of each chat.
+        chat_registry._persist()
 
 
 app = FastAPI(title="Claude GUI", lifespan=lifespan)
