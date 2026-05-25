@@ -17,17 +17,33 @@ export default function ChatPage() {
   const resume = params.get("resume") || undefined;
   const initialCwd = params.get("cwd") || "";
 
+  // Persistent per-session settings: when reloading a resumed session, restore
+  // last-used mode/effort/model from localStorage so the dock doesn't reset to
+  // defaults each refresh. Keyed by resume sessionId; new chats use "_new".
+  const storageKey = `chat-settings:${resume || "_new"}`;
+  const storedSettings = (() => {
+    if (typeof window === "undefined") return {} as { permissionMode?: string; effort?: string; model?: string };
+    try { return JSON.parse(localStorage.getItem(storageKey) || "{}"); } catch { return {}; }
+  })();
+
   const [chatId, setChatId] = useState<string | null>(null);
   const [cwd, setCwd] = useState(initialCwd);
-  const [model, setModel] = useState("");
-  const [permissionMode, setPermissionMode] = useState("default");
-  const [effort, setEffort] = useState("");
+  const [model, setModel] = useState<string>(storedSettings.model ?? "");
+  const [permissionMode, setPermissionMode] = useState<string>(storedSettings.permissionMode ?? "default");
+  const [effort, setEffort] = useState<string>(storedSettings.effort ?? "");
   const [starting, setStarting] = useState(false);
   // `ready` flips to true when the user clicks Start chat — switches the page
   // from the start form into the regular chat UI without creating a backend
   // session (SDK is launched lazily on first send).
   const [ready, setReady] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  // Save settings on every change.
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ permissionMode, effort, model }));
+    } catch { /* quota / private mode — ignore */ }
+  }, [storageKey, permissionMode, effort, model]);
 
   const { data: projects } = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const [showFiles, setShowFiles] = useState(false);
@@ -167,6 +183,12 @@ export default function ChatPage() {
     if (historyTurns.length > 0) {
       setTurns(historyTurns);
     }
+    // Push any pre-selected non-default mode/effort/model to the backend so a
+    // user who picked e.g. Bypass *before* the SDK started gets a session
+    // that actually respects that choice on the very first turn.
+    if (permissionMode && permissionMode !== "default") void setMode(permissionMode);
+    if (effort) void api.setEffort(chatId, effort);
+    if (model) void api.setModel(chatId, model);
     if (pendingSendRef.current === null) return;
     const c = pendingSendRef.current;
     pendingSendRef.current = null;

@@ -372,8 +372,8 @@ function ComposerImpl(
         </button>
 
         <ModeDropdown mode={mode} onChange={onSelectMode} />
-        <EffortDropdown effort={effort} onChange={onSelectEffort} />
         <ModelDropdown model={model} onChange={onSelectModel} />
+        <EffortDropdown effort={effort} onChange={onSelectEffort} />
 
         <div className="flex-1" />
 
