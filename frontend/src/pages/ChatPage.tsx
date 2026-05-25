@@ -26,7 +26,13 @@ export default function ChatPage() {
     try { return JSON.parse(localStorage.getItem(storageKey) || "{}"); } catch { return {}; }
   })();
 
-  const [chatId, setChatId] = useState<string | null>(null);
+  // On mount, immediately restore cached chatId for resume sessions so the SSE
+  // stream reconnects and the working state (timer, status, in-flight turn)
+  // is recovered without waiting for the user to send a message.
+  const [chatId, setChatId] = useState<string | null>(() => {
+    if (!resume) return null;
+    try { return sessionStorage.getItem(`chat-start:${resume}`) || null; } catch { return null; }
+  });
   const [cwd, setCwd] = useState(initialCwd);
   const [model, setModel] = useState<string>(storedSettings.model ?? "");
   const [permissionMode, setPermissionMode] = useState<string>(storedSettings.permissionMode ?? "default");
@@ -160,9 +166,13 @@ export default function ChatPage() {
       return;
     }
     if (firstLoad) {
-      // first hydration after a live session was created: seed the store once
       setHistoryTurns(turns);
-      setTurns(turns);
+      // Seed the SSE store only if it has no turns yet. If the store already
+      // has turns (e.g. user switched away and back while a turn was running),
+      // preserve the live state — do not overwrite with the stale JSONL snapshot.
+      if (state.turns.length === 0) {
+        setTurns(turns);
+      }
       loadedHistoryRef.current = resume;
     }
     // After the first seed, do NOT overwrite — let the SSE stream drive turns.
@@ -211,6 +221,27 @@ export default function ChatPage() {
   // race with a CLI that may also be writing this session). The session is
   // lazily created when the user sends the first message.
 
+  // On mount, verify the synchronously-restored chatId is still alive on the
+  // backend. If the backend restarted and lost it, fall back to null so the
+  // lazy-start path creates a fresh session on next send.
+  useEffect(() => {
+    if (!chatId || !resume) return;
+    const id = chatId;
+    (async () => {
+      try {
+        const r = await fetch(`/api/chat/${id}/usage`);
+        if (!r.ok) {
+          sessionStorage.removeItem(`chat-start:${resume}`);
+          setChatId(null);
+        }
+      } catch {
+        // Network error — leave chatId intact; sessionMissing handler will catch it
+      }
+    })();
+    // Run only on mount (chatId from initial state); deps are intentionally empty.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // If the backend lost the chatId (e.g. server restart), clear the cached
   // lock and start a fresh session automatically.
   useEffect(() => {
@@ -232,10 +263,10 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!chatId) return;
-    // Seed the live store with the JSONL history the moment a backend session
-    // is created — otherwise switching from `historyTurns` to `state.turns`
-    // would make the screen look empty until the next history poll lands.
-    if (historyTurns.length > 0) {
+    // Seed the live store with the JSONL history only if the store is empty.
+    // If the store already has turns (e.g. user navigated away and back while
+    // a turn was running), the SSE stream is the source of truth — do not overwrite.
+    if (historyTurns.length > 0 && state.turns.length === 0) {
       setTurns(historyTurns);
     }
     // Push any pre-selected non-default mode/effort/model to the backend so a
