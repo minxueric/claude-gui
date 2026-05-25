@@ -96,6 +96,36 @@ export default function ChatPage() {
     });
   }, [turns.length, state.pending?.requestId, isNearBottom]);
 
+  // Initial mount / first-load jump-to-bottom: when the chat hydrates with
+  // history (resumed session refresh), drop the user straight at the latest
+  // message instead of leaving them at the top. Re-anchor a few times to
+  // catch async markdown/highlight layout growth.
+  const initialScrolledRef = useRef(false);
+  useEffect(() => {
+    if (initialScrolledRef.current) return;
+    if (turns.length === 0) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    initialScrolledRef.current = true;
+    const settle = (delay: number) => {
+      setTimeout(() => {
+        const c = scrollContainerRef.current;
+        if (c) c.scrollTop = c.scrollHeight;
+      }, delay);
+    };
+    // immediate + a few post-paint anchors to catch async content growth
+    settle(0);
+    settle(60);
+    settle(200);
+    settle(600);
+  }, [turns.length]);
+
+  // Reset the initial-scroll flag when we navigate to a different session,
+  // so the next hydration also jumps to the bottom.
+  useEffect(() => {
+    initialScrolledRef.current = false;
+  }, [resume, chatId]);
+
   // Load historical messages for resumed sessions, and poll for CLI updates.
   // Note: state.turns includes both live SSE events and historical ones; we
   // replace the whole array each refresh, which is fine because (a) historical
