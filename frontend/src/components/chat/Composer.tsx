@@ -608,21 +608,28 @@ function WorkingIndicator({ lastEventAt, onInterrupt }: { lastEventAt?: number; 
   const [idx, setIdx] = useState(() => Math.floor(Math.random() * WORKING_VERBS.length));
   const [elapsed, setElapsed] = useState(0);
   const [silenceSec, setSilenceSec] = useState(0);
-  const startedAt = useRef(Date.now());
+  // startedAt is captured once when the indicator first appears (mount). We
+  // must NOT reset it whenever lastEventAt changes — otherwise every SSE
+  // event (assistant_message / usage / ping ...) would snap elapsed back to
+  // 0 and the timer would visibly restart.
+  const startedAt = useRef<number>(Date.now());
+  const lastEventAtRef = useRef<number | undefined>(lastEventAt);
+
+  // Keep latest lastEventAt readable from the ticker without re-binding the
+  // interval (otherwise the interval would be torn down on every event).
+  useEffect(() => { lastEventAtRef.current = lastEventAt; }, [lastEventAt]);
 
   useEffect(() => {
-    startedAt.current = Date.now();
     const tickElapsed = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startedAt.current) / 1000));
-      if (lastEventAt) {
-        setSilenceSec(Math.floor((Date.now() - lastEventAt) / 1000));
-      }
+      const last = lastEventAtRef.current;
+      if (last) setSilenceSec(Math.floor((Date.now() - last) / 1000));
     }, 1000);
     const tickVerb = setInterval(() => {
       setIdx(Math.floor(Math.random() * WORKING_VERBS.length));
     }, 3500);
     return () => { clearInterval(tickElapsed); clearInterval(tickVerb); };
-  }, [lastEventAt]);
+  }, []);
 
   const stuck = silenceSec >= 90;
   const [verb, zh] = WORKING_VERBS[idx];
