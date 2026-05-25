@@ -268,6 +268,11 @@ export function useChatStream(chatId: string | null, initialMode: string = "defa
 
   const setMode = useCallback(
     async (mode: string) => {
+      // Always reflect the change locally so the dropdown UI updates even
+      // before a backend session exists (lazy-start path).
+      if (chatId) {
+        updateState(chatId, (s) => ({ ...s, mode }));
+      }
       if (!chatId) return;
       try {
         const r = await fetch(`/api/chat/${chatId}/permission_mode`, {

@@ -382,9 +382,9 @@ export default function ChatPage() {
           <Composer
             ref={composerRef}
             cwd={cwd}
-            mode={state.mode}
+            mode={chatId ? state.mode : permissionMode}
             onCycleMode={cycleMode}
-            onSelectMode={(m) => setMode(m)}
+            onSelectMode={(m) => { setPermissionMode(m); setMode(m); }}
             effort={effort}
             onSelectEffort={(e) => { setEffort(e); if (chatId) void api.setEffort(chatId, e); }}
             model={model}
