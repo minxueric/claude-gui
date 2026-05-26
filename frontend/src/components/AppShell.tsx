@@ -340,6 +340,10 @@ export default function AppShell() {
             <NavLink
               key={n.to}
               to={n.to}
+              onClick={() => {
+                // Clear the cached new-chat session so New Chat always starts fresh.
+                if (n.label === "New Chat") sessionStorage.removeItem("chat-start:__new__");
+              }}
               className={({ isActive }) =>
                 clsx(
                   "flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-[13px] font-medium",

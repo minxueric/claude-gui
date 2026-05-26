@@ -22,18 +22,19 @@ export default function ChatPage() {
   // defaults each refresh. Keyed by resume sessionId; new chats use "_new".
   const storageKey = `chat-settings:${resume || "_new"}`;
   const storedSettings = (() => {
-    if (typeof window === "undefined") return {} as { permissionMode?: string; effort?: string; model?: string };
+    if (typeof window === "undefined") return {} as { permissionMode?: string; effort?: string; model?: string; cwd?: string };
     try { return JSON.parse(localStorage.getItem(storageKey) || "{}"); } catch { return {}; }
   })();
 
-  // On mount, immediately restore cached chatId for resume sessions so the SSE
-  // stream reconnects and the working state (timer, status, in-flight turn)
-  // is recovered without waiting for the user to send a message.
+  // On mount, immediately restore cached chatId so the SSE stream reconnects
+  // and the working state (timer, status, in-flight turn) is recovered without
+  // waiting for the user to send a message. Works for both resume sessions and
+  // new chats (keyed by "__new__" when no resume id is present).
+  const chatStorageKey = resume ? `chat-start:${resume}` : "chat-start:__new__";
   const [chatId, setChatId] = useState<string | null>(() => {
-    if (!resume) return null;
-    try { return sessionStorage.getItem(`chat-start:${resume}`) || null; } catch { return null; }
+    try { return sessionStorage.getItem(chatStorageKey) || null; } catch { return null; }
   });
-  const [cwd, setCwd] = useState(initialCwd);
+  const [cwd, setCwd] = useState(initialCwd || storedSettings.cwd || "");
   const [model, setModel] = useState<string>(storedSettings.model ?? "");
   const [permissionMode, setPermissionMode] = useState<string>(storedSettings.permissionMode ?? "default");
   const [effort, setEffort] = useState<string>(storedSettings.effort ?? "");
@@ -47,9 +48,9 @@ export default function ChatPage() {
   // Save settings on every change.
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ permissionMode, effort, model }));
+      localStorage.setItem(storageKey, JSON.stringify({ permissionMode, effort, model, cwd }));
     } catch { /* quota / private mode — ignore */ }
-  }, [storageKey, permissionMode, effort, model]);
+  }, [storageKey, permissionMode, effort, model, cwd]);
 
   const { data: projects } = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const [showFiles, setShowFiles] = useState(false);
@@ -196,7 +197,7 @@ export default function ChatPage() {
 
   const start = async () => {
     if (!cwd && !resume) return;  // new chat requires cwd; resume can use empty cwd
-    const lockKey = resume ? `chat-start:${resume}` : null;
+    const lockKey = chatStorageKey;  // always persist chatId (resume or new chat)
     // Reuse cached chatId only if the backend still has it (survives backend restarts).
     if (lockKey) {
       const cached = sessionStorage.getItem(lockKey);
@@ -241,13 +242,13 @@ export default function ChatPage() {
   // backend. If the backend restarted and lost it, fall back to null so the
   // lazy-start path creates a fresh session on next send.
   useEffect(() => {
-    if (!chatId || !resume) return;
+    if (!chatId) return;
     const id = chatId;
     (async () => {
       try {
         const r = await fetch(`/api/chat/${id}/usage`);
         if (!r.ok) {
-          sessionStorage.removeItem(`chat-start:${resume}`);
+          sessionStorage.removeItem(chatStorageKey);
           setChatId(null);
         }
       } catch {
@@ -262,9 +263,7 @@ export default function ChatPage() {
   // lock and start a fresh session automatically.
   useEffect(() => {
     if (!state.sessionMissing) return;
-    if (resume) {
-      sessionStorage.removeItem(`chat-start:${resume}`);
-    }
+    sessionStorage.removeItem(chatStorageKey);
     setChatId(null);
     startedRef.current = false;
     // Kick off a new session immediately, regardless of whether this was a resume.
