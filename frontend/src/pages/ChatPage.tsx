@@ -102,6 +102,22 @@ export default function ChatPage() {
     });
   }, [turns.length, state.pending?.requestId, isNearBottom]);
 
+  // When a turn finishes (running → idle/done), always scroll to the bottom
+  // so the reply is visible without the user having to scroll manually.
+  // The isNearBottom guard is intentionally skipped here: while the
+  // WorkingIndicator was showing, the user was visually "at the bottom"
+  // even though scrollTop was not near scrollHeight (indicator height gap).
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const wasRunning = prevStatusRef.current === "running";
+    prevStatusRef.current = state.status;
+    if (!wasRunning || state.status === "running") return;
+    requestAnimationFrame(() => {
+      const c = scrollContainerRef.current;
+      if (c) c.scrollTop = c.scrollHeight;
+    });
+  }, [state.status]);
+
   // Initial mount / first-load jump-to-bottom: when the chat hydrates with
   // history (resumed session refresh), drop the user straight at the latest
   // message instead of leaving them at the top. Re-anchor a few times to
