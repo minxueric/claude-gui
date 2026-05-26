@@ -119,17 +119,24 @@ def browse(path: str = Query("~")) -> dict:
         raise HTTPException(400, "not a directory")
     entries: list[dict] = []
     try:
-        for child in sorted(target.iterdir(), key=lambda p: p.name.lower()):
-            if not child.is_dir():
-                continue
-            # skip well-known noise dirs
-            if child.name.startswith(".") and child.name not in {".claude", ".config"}:
-                continue
-            if child.name in IGNORE_DIRS:
-                continue
-            entries.append({"name": child.name, "path": str(child)})
+        children = list(target.iterdir())
     except PermissionError:
         raise HTTPException(403, "permission denied")
+    except OSError as e:
+        raise HTTPException(500, f"cannot list directory: {e}")
+    children.sort(key=lambda p: p.name.lower())
+    for child in children:
+        try:
+            if not child.is_dir():
+                continue
+        except OSError:
+            continue
+        # skip well-known noise dirs
+        if child.name.startswith(".") and child.name not in {".claude", ".config"}:
+            continue
+        if child.name in IGNORE_DIRS:
+            continue
+        entries.append({"name": child.name, "path": str(child)})
     parent = str(target.parent) if str(target) != "/" else None
     return {
         "path": str(target),
