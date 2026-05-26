@@ -179,7 +179,7 @@ export default function ChatPage() {
   }, [historyQ.data, resume, setTurns, chatId]);
 
   const start = async () => {
-    if (!cwd) return;
+    if (!cwd && !resume) return;  // new chat requires cwd; resume can use empty cwd
     const lockKey = resume ? `chat-start:${resume}` : null;
     // Reuse cached chatId only if the backend still has it (survives backend restarts).
     if (lockKey) {
@@ -252,7 +252,7 @@ export default function ChatPage() {
     setChatId(null);
     startedRef.current = false;
     // Kick off a new session immediately, regardless of whether this was a resume.
-    if (cwd) {
+    if (cwd || resume) {
       void start();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
