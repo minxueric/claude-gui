@@ -1,6 +1,8 @@
 """Plans: list & read ~/.claude/plans/*.md."""
 from __future__ import annotations
 
+import subprocess
+import sys
 from fastapi import APIRouter, HTTPException
 
 from .. import config
@@ -40,3 +42,23 @@ def get_plan(name: str) -> dict:
     if not p.is_file():
         raise HTTPException(404, "not found")
     return {"name": name, "content": p.read_text(errors="replace"), "modified": p.stat().st_mtime}
+
+
+@router.post("/plans/{name}/reveal")
+def reveal_plan(name: str) -> dict:
+    """Reveal the plan .md file in Finder (macOS) or file manager."""
+    if "/" in name or ".." in name:
+        raise HTTPException(400, "bad name")
+    p = config.PLANS_DIR / name
+    if not p.is_file():
+        raise HTTPException(404, "not found")
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["open", "-R", str(p)], check=False)
+        elif sys.platform.startswith("linux"):
+            subprocess.run(["xdg-open", str(p.parent)], check=False)
+        else:
+            raise HTTPException(501, "unsupported platform")
+    except FileNotFoundError as e:
+        raise HTTPException(500, f"reveal failed: {e}")
+    return {"ok": True}

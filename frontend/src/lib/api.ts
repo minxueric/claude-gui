@@ -215,6 +215,11 @@ export const api = {
     ),
   plans: () => get<PlanFile[]>("/api/plans"),
   plan: (name: string) => get<{ name: string; content: string; modified: number }>(`/api/plans/${name}`),
+  revealPlan: async (name: string) => {
+    const r = await fetch(`/api/plans/${encodeURIComponent(name)}/reveal`, { method: "POST" });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json() as Promise<{ ok: boolean }>;
+  },
   commands: (cwd?: string) =>
     get<SlashCommand[]>(`/api/commands${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`),
   fileTree: (cwd: string, path: string = "") => {

@@ -2,12 +2,32 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, formatTime } from "../lib/api";
 import MarkdownBlock from "../components/blocks/MarkdownBlock";
+import { toast } from "../lib/toast";
 import clsx from "clsx";
 
 export default function PlansPage() {
   const { name } = useParams();
   const list = useQuery({ queryKey: ["plans"], queryFn: api.plans });
   const detail = useQuery({ queryKey: ["plan", name], queryFn: () => api.plan(name!), enabled: !!name });
+
+  const copyContent = async () => {
+    if (!detail.data?.content) return;
+    try {
+      await navigator.clipboard.writeText(detail.data.content);
+      toast.success("已复制全文");
+    } catch {
+      toast.error("复制失败");
+    }
+  };
+
+  const revealInFinder = async () => {
+    if (!name) return;
+    try {
+      await api.revealPlan(name);
+    } catch (e) {
+      toast.error("无法打开文件", { description: (e as Error).message });
+    }
+  };
 
   return (
     <div className="h-full flex bg-white">
@@ -43,7 +63,23 @@ export default function PlansPage() {
         )}
         {detail.data && (
           <article className="max-w-3xl mx-auto px-10 py-10 animate-rise">
-            <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Plan · {detail.data.name}</div>
+            <div className="flex items-center gap-2 mb-4">
+              <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide flex-1">Plan · {detail.data.name}</div>
+              <button
+                onClick={copyContent}
+                title="复制全文"
+                className="px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 text-[11px] font-medium transition-colors"
+              >
+                复制全文
+              </button>
+              <button
+                onClick={revealInFinder}
+                title="在 Finder 中显示"
+                className="px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 text-[11px] font-medium transition-colors"
+              >
+                在 Finder 中显示
+              </button>
+            </div>
             <MarkdownBlock text={detail.data.content} />
           </article>
         )}
