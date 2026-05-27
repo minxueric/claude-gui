@@ -406,7 +406,7 @@ function ComposerImpl(
 }
 
 export function nextMode(current: string): string {
-  const MODE_CYCLE = ["default", "acceptEdits", "plan", "bypassPermissions"] as const;
+  const MODE_CYCLE = ["default", "auto", "acceptEdits", "plan", "bypassPermissions"] as const;
   const idx = MODE_CYCLE.indexOf(current as any);
   if (idx < 0) return MODE_CYCLE[0];
   return MODE_CYCLE[(idx + 1) % MODE_CYCLE.length];
@@ -414,6 +414,7 @@ export function nextMode(current: string): string {
 
 const MODE_OPTIONS: { value: string; label: string; desc: string; cls: string }[] = [
   { value: "default", label: "Default", desc: "Ask before each tool", cls: "border-gray-200 text-gray-600" },
+  { value: "auto", label: "Auto", desc: "Claude decides autonomously", cls: "border-blue-300 text-blue-600 bg-blue-50" },
   { value: "acceptEdits", label: "Accept edits", desc: "Auto-allow file edits", cls: "border-orange-300 text-orange-600 bg-orange-50" },
   { value: "plan", label: "Plan", desc: "Read-only; produce a plan", cls: "border-amber-300 text-amber-700 bg-amber-50" },
   { value: "bypassPermissions", label: "Bypass", desc: "Never ask (dangerous)", cls: "border-red-300 text-red-500 bg-red-50" },
