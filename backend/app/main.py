@@ -16,6 +16,7 @@ from .indexer import scanner, watcher
 from .routers import (
     chat,
     commands,
+    feedback,
     files,
     mcp,
     memory,
@@ -109,11 +110,20 @@ app.include_router(files.router, prefix="/api")
 app.include_router(memory.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
 app.include_router(mcp.router, prefix="/api")
+app.include_router(feedback.router, prefix="/api")
 
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "claudeHome": str(config.CLAUDE_HOME), "indexDb": str(config.INDEX_DB)}
+    import subprocess as _sp
+    version = None
+    try:
+        r = _sp.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=str(Path(__file__).parent.parent.parent))
+        if r.returncode == 0:
+            version = r.stdout.strip()
+    except Exception:
+        pass
+    return {"ok": True, "claudeHome": str(config.CLAUDE_HOME), "indexDb": str(config.INDEX_DB), "version": version}
 
 
 @app.post("/api/admin/reindex")

@@ -22,8 +22,18 @@ const SECONDARY_NAV: { to: string; label: string; icon: string }[] = [
 
 function MoreMenu() {
   const [open, setOpen] = useState(false);
+  const [autoReport, setAutoReport] = useState(
+    () => localStorage.getItem("auto-report-errors") === "true"
+  );
   const loc = useLocation();
   const isActiveSecondary = SECONDARY_NAV.some((n) => loc.pathname.startsWith(n.to));
+
+  const toggleAutoReport = () => {
+    const next = !autoReport;
+    setAutoReport(next);
+    localStorage.setItem("auto-report-errors", next ? "true" : "false");
+  };
+
   return (
     <div className="relative">
       <button
@@ -61,6 +71,16 @@ function MoreMenu() {
                 <span>{n.label}</span>
               </NavLink>
             ))}
+            <div className="border-t border-gray-100 mt-1 pt-1">
+              <button
+                onClick={toggleAutoReport}
+                className="w-full flex items-center gap-3 px-3 py-1.5 text-[12.5px] text-gray-600 hover:bg-gray-50"
+              >
+                <span className="text-[13px] w-4 text-center shrink-0">{autoReport ? "●" : "○"}</span>
+                <span>自动上报错误</span>
+                <span className="ml-auto text-[10px] text-gray-400">{autoReport ? "开" : "关"}</span>
+              </button>
+            </div>
           </div>
         </>
       )}

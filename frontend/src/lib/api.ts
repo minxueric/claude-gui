@@ -300,6 +300,26 @@ export const api = {
     get<{ days: number; tools: StatsToolRow[] }>(`/api/stats/tools?days=${days}&limit=${limit}`),
   statsTotals: (days = 30) =>
     get<StatsTotals>(`/api/stats/totals?days=${days}`),
+  submitFeedback: async (req: {
+    title: string;
+    description: string;
+    includeSystemInfo: boolean;
+    systemInfo?: Record<string, string | undefined>;
+    isAutoReport?: boolean;
+  }) => {
+    const r = await fetch("/api/feedback/issue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || `${r.status} ${r.statusText}`);
+    }
+    return r.json() as Promise<{ url: string; number: number | null }>;
+  },
+  listIssues: () =>
+    get<{ issues: any[]; repo: string }>("/api/feedback/issues"),
 };
 
 export interface StatsDailyPoint {
