@@ -174,7 +174,7 @@ class ChatSession:
         # Honor the current permission_mode without round-tripping through the
         # GUI: bypass and accept-edits never block the SDK.
         mode = self.permission_mode
-        if mode == "bypassPermissions":
+        if mode in ("bypassPermissions", "auto"):
             return PermissionResultAllow(updated_input=tool_input)
         if mode == "acceptEdits" and tool_name in self._EDIT_LIKE_TOOLS:
             return PermissionResultAllow(updated_input=tool_input)
@@ -399,7 +399,7 @@ class ChatSession:
         self._send_event.set()
 
     async def set_permission_mode(self, mode: str) -> bool:
-        if mode not in {"default", "acceptEdits", "bypassPermissions", "plan"}:
+        if mode not in {"default", "acceptEdits", "bypassPermissions", "plan", "auto"}:
             return False
         # Track the mode we had before entering plan so ExitPlanMode can
         # restore it (or auto-upgrade to acceptEdits, matching CLI behavior).
